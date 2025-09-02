@@ -67,6 +67,9 @@ enum Handle {
     Bin(TinyArray),
     BinRef(Slice),
     FuncRef(Slice),
+    ListRef(Slice),
+    ListCRef(Slice),
+    TupleRef(Slice),
 }
 
 /// A compact, copyable handle referencing a term stored in a [`Arena`].
@@ -223,8 +226,8 @@ impl Term {
         if terms.is_empty() {
             return Self::NIL;
         }
-        let slice = arena.intern_func(Self::LIST, terms);
-        Self(Handle::FuncRef(Slice {
+        let slice = arena.intern_seq(terms);
+        Self(Handle::ListRef(Slice {
             arena_id: arena.id,
             index: slice.index,
             len: slice.len,
@@ -239,8 +242,8 @@ impl Term {
         if terms.is_empty() {
             return Self::NIL;
         }
-        let slice = arena.intern_func_plus_one(Self::LISTC, terms, *tail);
-        Self(Handle::FuncRef(Slice {
+        let slice = arena.intern_seq_plus_one(terms, *tail);
+        Self(Handle::ListCRef(Slice {
             arena_id: arena.id,
             index: slice.index,
             len: slice.len,
@@ -254,8 +257,8 @@ impl Term {
         if terms.is_empty() {
             return Self::UNIT;
         }
-        let slice = arena.intern_func(Self::TUPLE, terms);
-        Self(Handle::FuncRef(Slice {
+        let slice = arena.intern_seq(terms);
+        Self(Handle::TupleRef(Slice {
             arena_id: arena.id,
             index: slice.index,
             len: slice.len,
@@ -276,24 +279,6 @@ impl Term {
     pub const NIL: Self = {
         let buf: [u8; 14] = [b'n', b'i', b'l', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         Self(Handle::Atom(TinyArray { bytes: buf, len: 3 }))
-    };
-
-    /// Constant representing list functor (atom).
-    pub const LIST: Self = {
-        let buf: [u8; 14] = [b'l', b'i', b's', b't', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Self(Handle::Atom(TinyArray { bytes: buf, len: 4 }))
-    };
-
-    /// Constant representing improper list functor (atom).
-    pub const LISTC: Self = {
-        let buf: [u8; 14] = [b'l', b'i', b's', b't', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Self(Handle::Atom(TinyArray { bytes: buf, len: 5 }))
-    };
-
-    /// Constant representing tuple functor (atom).
-    pub const TUPLE: Self = {
-        let buf: [u8; 14] = [b't', b'u', b'p', b'l', b'e', 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Self(Handle::Atom(TinyArray { bytes: buf, len: 5 }))
     };
 
     /// Produce a [`View`] of this term that borrows from the given
@@ -380,6 +365,37 @@ impl Term {
                 let args = &slice[1..];
                 Ok(View::Func(arena, functor, args))
             }
+            Handle::ListRef(lr) => {
+                if arena.id != lr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
+                let slice = arena.term_slice(TermSlice {
+                    index: lr.index,
+                    len: lr.len,
+                });
+                Ok(View::List(arena, slice))
+            }
+            Handle::ListCRef(lr) => {
+                if arena.id != lr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
+                let slice = arena.term_slice(TermSlice {
+                    index: lr.index,
+                    len: lr.len,
+                });
+                let last = slice.len() - 1;
+                Ok(View::ListC(arena, &slice[..last], &slice[last]))
+            }
+            Handle::TupleRef(tr) => {
+                if arena.id != tr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
+                let slice = arena.term_slice(TermSlice {
+                    index: tr.index,
+                    len: tr.len,
+                });
+                Ok(View::List(arena, slice))
+            }
         }
     }
 
@@ -397,13 +413,46 @@ impl Term {
             | Handle::VarRef(_)
             | Handle::StrRef(_)
             | Handle::BinRef(_)
-            | Handle::FuncRef(_) => false,
+            | Handle::FuncRef(_)
+            | Handle::ListRef(_)
+            | Handle::ListCRef(_)
+            | Handle::TupleRef(_) => false,
         }
     }
 
     #[inline(always)]
     pub fn is_func(&self) -> bool {
         matches!(self.0, Handle::FuncRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_list(&self) -> bool {
+        matches!(self.0, Handle::ListRef(_)) || *self == Self::NIL
+    }
+
+    #[inline(always)]
+    pub fn is_listc(&self) -> bool {
+        matches!(self.0, Handle::ListCRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_tuple(&self) -> bool {
+        matches!(self.0, Handle::TupleRef(_)) || *self == Self::UNIT
+    }
+
+    #[inline(always)]
+    pub fn is_int(&self) -> bool {
+        matches!(self.0, Handle::Int(_))
+    }
+
+    #[inline(always)]
+    pub fn is_real(&self) -> bool {
+        matches!(self.0, Handle::Real(_))
+    }
+
+    #[inline(always)]
+    pub fn is_date(&self) -> bool {
+        matches!(self.0, Handle::Date(_))
     }
 
     #[inline(always)]
@@ -493,6 +542,24 @@ impl fmt::Debug for Term {
                 .field("index", &fr.index)
                 .field("len", &fr.len)
                 .finish(),
+            Handle::ListRef(lr) => f
+                .debug_struct("List")
+                .field("arena_id", &lr.arena_id)
+                .field("index", &lr.index)
+                .field("len", &lr.len)
+                .finish(),
+            Handle::ListCRef(lr) => f
+                .debug_struct("ListC")
+                .field("arena_id", &lr.arena_id)
+                .field("index", &lr.index)
+                .field("len", &lr.len)
+                .finish(),
+            Handle::TupleRef(tr) => f
+                .debug_struct("Tuple")
+                .field("arena_id", &tr.arena_id)
+                .field("index", &tr.index)
+                .field("len", &tr.len)
+                .finish(),
         }
     }
 }
@@ -511,6 +578,22 @@ impl fmt::Debug for View<'_> {
                 .debug_tuple("Func")
                 .field(&a.id)
                 .field(&fr)
+                .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
+                .finish(),
+            View::List(a, ts) => f
+                .debug_tuple("List")
+                .field(&a.id)
+                .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
+                .finish(),
+            View::ListC(a, ts, tail) => f
+                .debug_tuple("ListC")
+                .field(&a.id)
+                .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
+                .field(&tail.view(a))
+                .finish(),
+            View::Tuple(a, ts) => f
+                .debug_tuple("Tuple")
+                .field(&a.id)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .finish(),
         }
@@ -547,6 +630,18 @@ pub enum View<'a> {
     /// borrowed; the arguments themselves are `Term` handles owned
     /// by the arena.
     Func(&'a Arena, &'a str, &'a [Term]),
+    /// A list view containing a slice of the list elements.
+    /// The element slice are borrowed; the elements
+    /// themselves are `Term` handles owned by the arena.
+    List(&'a Arena, &'a [Term]),
+    /// An improper list view containing a slice of the list elements
+    /// and a reference to the tail term. The element slice and the tail are
+    /// borrowed; the elements themselves are `Term` handles owned by the arena.
+    ListC(&'a Arena, &'a [Term], &'a Term),
+    /// A tuple view containing a slice of the tuple elements.
+    /// The element slice are borrowed; the elements
+    /// themselves are `Term` handles owned by the arena.
+    Tuple(&'a Arena, &'a [Term]),
 }
 
 /// The typed arena used to intern atoms, variables, strings,
@@ -717,15 +812,6 @@ impl Arena {
     /// freely and does not depend on any arena.
     pub const NIL: Term = Term::NIL;
 
-    /// Constant representing list functor (atom).
-    pub const LIST: Term = Term::LIST;
-
-    /// Constant representing improper list functor (atom).
-    pub const LISTC: Term = Term::LISTC;
-
-    /// Constant representing tuple functor (atom).
-    pub const TUPLE: Term = Term::TUPLE;
-
     /// Intern an atom and return its id.  Reusing the same atom
     /// repeatedly avoids additional allocations.  This uses an
     /// `IndexSet` to map each unique atom name to a stable index.
@@ -808,15 +894,24 @@ impl Arena {
         TermSlice { index, len }
     }
 
-    /// Intern a compound term slice plus one term (functor + args + term) into the term arena.
-    fn intern_func_plus_one(&mut self, functor: Term, args: &[Term], tail: Term) -> TermSlice {
+    /// Intern a seq term slice into the term arena.
+    fn intern_seq(&mut self, terms: &[Term]) -> TermSlice {
         let index = self.terms.len() as u32;
         // Reserve space to avoid multiple reallocations when pushing.
-        self.terms.reserve(args.len() + 2);
-        self.terms.push(functor);
-        self.terms.extend_from_slice(args);
+        self.terms.reserve(terms.len());
+        self.terms.extend_from_slice(terms);
+        let len = terms.len() as u32;
+        TermSlice { index, len }
+    }
+
+    /// Intern a seq term slice plus one term into the term arena.
+    fn intern_seq_plus_one(&mut self, terms: &[Term], tail: Term) -> TermSlice {
+        let index = self.terms.len() as u32;
+        // Reserve space to avoid multiple reallocations when pushing.
+        self.terms.reserve(terms.len() + 1);
+        self.terms.extend_from_slice(terms);
         self.terms.push(tail);
-        let len = (args.len() + 2) as u32;
+        let len = (terms.len() + 1) as u32;
         TermSlice { index, len }
     }
 
@@ -931,6 +1026,34 @@ impl<'a> PartialEq for View<'a> {
                         == b.view(arena_b).expect("arena mismatch")
                 })
             }
+            (View::List(arena_a, args_a), View::List(arena_b, args_b)) => {
+                if args_a.len() != args_b.len() {
+                    return false;
+                }
+                args_a.iter().zip(args_b.iter()).all(|(a, b)| {
+                    a.view(arena_a).expect("arena mismatch")
+                        == b.view(arena_b).expect("arena mismatch")
+                })
+            }
+            (View::ListC(arena_a, args_a, tail_a), View::ListC(arena_b, args_b, tail_b)) => {
+                if args_a.len() != args_b.len() {
+                    return false;
+                }
+                args_a.iter().zip(args_b.iter()).all(|(a, b)| {
+                    a.view(arena_a).expect("arena mismatch")
+                        == b.view(arena_b).expect("arena mismatch")
+                }) && tail_a.view(arena_a).expect("arena mismatch")
+                    == tail_b.view(arena_b).expect("arena mismatch")
+            }
+            (View::Tuple(arena_a, args_a), View::Tuple(arena_b, args_b)) => {
+                if args_a.len() != args_b.len() {
+                    return false;
+                }
+                args_a.iter().zip(args_b.iter()).all(|(a, b)| {
+                    a.view(arena_a).expect("arena mismatch")
+                        == b.view(arena_b).expect("arena mismatch")
+                })
+            }
             _ => unreachable!(),
         }
     }
@@ -992,6 +1115,64 @@ impl core::cmp::Ord for View<'_> {
                 }
                 Ordering::Equal
             }
+            (View::List(arena_a, args_a), View::List(arena_b, args_b)) => {
+                let ord = args_a.len().cmp(&args_b.len());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()).map(|(a, b)| {
+                    (
+                        a.view(arena_a).expect("arena mismatch"),
+                        b.view(arena_b).expect("arena mismatch"),
+                    )
+                }) {
+                    let ord = arg_a.cmp(&arg_b);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                Ordering::Equal
+            }
+            (View::ListC(arena_a, args_a, tail_a), View::ListC(arena_b, args_b, tail_b)) => {
+                let ord = args_a.len().cmp(&args_b.len());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()).map(|(a, b)| {
+                    (
+                        a.view(arena_a).expect("arena mismatch"),
+                        b.view(arena_b).expect("arena mismatch"),
+                    )
+                }) {
+                    let ord = arg_a.cmp(&arg_b);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                tail_a
+                    .view(arena_a)
+                    .expect("arena mismatch")
+                    .cmp(&tail_b.view(arena_b).expect("arena mismatch"))
+            }
+            (View::Tuple(arena_a, args_a), View::Tuple(arena_b, args_b)) => {
+                let ord = args_a.len().cmp(&args_b.len());
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()).map(|(a, b)| {
+                    (
+                        a.view(arena_a).expect("arena mismatch"),
+                        b.view(arena_b).expect("arena mismatch"),
+                    )
+                }) {
+                    let ord = arg_a.cmp(&arg_b);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                Ordering::Equal
+            }
+
             _ => unreachable!(),
         }
     }
@@ -1008,6 +1189,9 @@ fn kind_order(t: &View) -> u8 {
         View::Str(_) => 3,
         View::Bin(_) => 4,
         View::Func(_, _, _) => 5,
+        View::Tuple(_, _) => 6,
+        View::List(_, _) => 7,
+        View::ListC(_, _, _) => 8,
     }
 }
 
@@ -1034,18 +1218,24 @@ macro_rules! list {
     () => {
         $crate::Term::NIL
     };
-    // proper list with tail omitted
+    // proper list
     ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
         {
             let elems = &[$($elem),+];
-            $crate::Term::func(&mut $arena, "list", elems)
+            $crate::Term::list(&mut $arena, elems)
         }
     };
+}
+
+/// Construct an improper list from a sequence of terms
+/// and a tail..
+#[macro_export]
+macro_rules! listc {
     // improper list with explicit tail
     ( &mut $arena:expr ; $( $elem:expr ),+ ; $tail:expr $(,)? ) => {
         {
-            let elems = &[$($elem),+, $tail];
-            $crate::Term::func(&mut $arena, "listc", elems)
+            let elems = &[$($elem),+];
+            $crate::Term::listc(&mut $arena, elems, &$tail)
         }
     };
 }
@@ -1062,7 +1252,7 @@ macro_rules! tuple {
     ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
         {
             let elems = &[$($elem),+];
-            $crate::Term::func(&mut $arena, "tuple", elems)
+            $crate::Term::tuple(&mut $arena, elems)
         }
     };
 }
@@ -1131,7 +1321,7 @@ mod tests {
         let g = list![&mut arena; d, e, f];
         let h = tuple![&mut arena; f];
         let p = Term::func(&mut arena, "point", &[a, b, c, d, e, f, g, h]);
-        let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], list![&mut arena; a, b; c]];
+        let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], listc![&mut arena; a, b; c]];
         dbg!(&p);
         dbg!(p.view(&arena));
         dbg!(arena.stats());
@@ -1159,5 +1349,14 @@ mod tests {
         dbg!(p);
         let v = a1.view(&p);
         dbg!(v);
+    }
+
+    #[test]
+    fn big_term() {
+        let mut a1 = Arena::new();
+        let x = a1.atom("Hello, hello, quite long long string, world! X");
+        let p = a1.func("foo", &vec![x; 1_000_000]);
+        assert!(p.arity() == 1_000_000);
+        dbg!(a1.stats());
     }
 }
