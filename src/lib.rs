@@ -35,13 +35,13 @@ struct TinyArray {
 
 #[derive(Copy, Clone, PartialEq)]
 struct Index {
-    arena_id: u32,
+    arena_id: ArenaID,
     index: u32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
 struct Slice {
-    arena_id: u32,
+    arena_id: ArenaID,
     index: u32,
     len: u32,
 }
@@ -86,14 +86,14 @@ impl Term {
     /// occurs.
     #[inline(always)]
     pub fn int(i: i64) -> Self {
-        Term(Handle::Int(i))
+        Self(Handle::Int(i))
     }
 
     /// Construct a new floating point term.  The full 64 bit IEEE‑754
     /// bit pattern is stored in the payload without truncation.
     #[inline(always)]
     pub fn real(f: f64) -> Self {
-        Term(Handle::Real(f))
+        Self(Handle::Real(f))
     }
 
     /// Construct a new date term representing a Unix epoch in
@@ -102,7 +102,7 @@ impl Term {
     /// with integer terms.
     #[inline(always)]
     pub fn date(ms: i64) -> Self {
-        Term(Handle::Date(ms))
+        Self(Handle::Date(ms))
     }
 
     /// Construct or intern an atom into the arena and produce a term
@@ -115,13 +115,13 @@ impl Term {
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
             buf[..bytes.len()].copy_from_slice(bytes);
-            Term(Handle::Atom(TinyArray {
+            Self(Handle::Atom(TinyArray {
                 bytes: buf,
                 len: bytes.len() as u8,
             }))
         } else {
             let id = arena.intern_atom(name);
-            Term(Handle::AtomRef(Index {
+            Self(Handle::AtomRef(Index {
                 arena_id: arena.id,
                 index: id.0,
             }))
@@ -138,13 +138,13 @@ impl Term {
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
             buf[..bytes.len()].copy_from_slice(bytes);
-            Term(Handle::Var(TinyArray {
+            Self(Handle::Var(TinyArray {
                 bytes: buf,
                 len: bytes.len() as u8,
             }))
         } else {
             let id = arena.intern_var(name);
-            Term(Handle::VarRef(Index {
+            Self(Handle::VarRef(Index {
                 arena_id: arena.id,
                 index: id.0,
             }))
@@ -161,13 +161,13 @@ impl Term {
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
             buf[..bytes.len()].copy_from_slice(bytes);
-            Term(Handle::Str(TinyArray {
+            Self(Handle::Str(TinyArray {
                 bytes: buf,
                 len: bytes.len() as u8,
             }))
         } else {
             let slice = arena.intern_str(s);
-            Term(Handle::StrRef(Slice {
+            Self(Handle::StrRef(Slice {
                 arena_id: arena.id,
                 index: slice.index,
                 len: slice.len,
@@ -183,13 +183,13 @@ impl Term {
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
             buf[..bytes.len()].copy_from_slice(bytes);
-            Term(Handle::Bin(TinyArray {
+            Self(Handle::Bin(TinyArray {
                 bytes: buf,
                 len: bytes.len() as u8,
             }))
         } else {
             let slice = arena.intern_bin(bytes);
-            Term(Handle::BinRef(Slice {
+            Self(Handle::BinRef(Slice {
                 arena_id: arena.id,
                 index: slice.index,
                 len: slice.len,
@@ -203,13 +203,59 @@ impl Term {
     /// the first entry followed by the argument handles.  A functor of
     /// arity zero results in an atom.
     #[inline(always)]
-    pub fn func(arena: &mut Arena, functor: &str, args: &[Term]) -> Self {
-        let functor_atom = Term::atom(arena, functor);
+    pub fn func(arena: &mut Arena, functor: &str, args: &[Self]) -> Self {
+        let functor_atom = Self::atom(arena, functor);
         if args.is_empty() {
             return functor_atom;
         }
         let slice = arena.intern_func(functor_atom, args);
-        Term(Handle::FuncRef(Slice {
+        Self(Handle::FuncRef(Slice {
+            arena_id: arena.id,
+            index: slice.index,
+            len: slice.len,
+        }))
+    }
+
+    /// Constructs a new list. A list is represented as a compound term
+    /// with the functor `list`.
+    #[inline(always)]
+    pub fn list(arena: &mut Arena, terms: &[Self]) -> Self {
+        if terms.is_empty() {
+            return Self::NIL;
+        }
+        let slice = arena.intern_func(Self::LIST, terms);
+        Self(Handle::FuncRef(Slice {
+            arena_id: arena.id,
+            index: slice.index,
+            len: slice.len,
+        }))
+    }
+
+    /// Constructs a new improper list. An improper list is represented as
+    /// a compound term with the functor `listc` and additional argument.
+    /// If `terms` is empty, returns `nil`.
+    #[inline(always)]
+    pub fn listc(arena: &mut Arena, terms: &[Self], tail: &Self) -> Self {
+        if terms.is_empty() {
+            return Self::NIL;
+        }
+        let slice = arena.intern_func_plus_one(Self::LISTC, terms, *tail);
+        Self(Handle::FuncRef(Slice {
+            arena_id: arena.id,
+            index: slice.index,
+            len: slice.len,
+        }))
+    }
+
+    /// Constructs a new tuple. A tuple is represented as a compound term
+    /// with the functor `tuple`.
+    #[inline(always)]
+    pub fn tuple(arena: &mut Arena, terms: &[Self]) -> Self {
+        if terms.is_empty() {
+            return Self::UNIT;
+        }
+        let slice = arena.intern_func(Self::TUPLE, terms);
+        Self(Handle::FuncRef(Slice {
             arena_id: arena.id,
             index: slice.index,
             len: slice.len,
@@ -221,7 +267,7 @@ impl Term {
     /// be copied freely and does not depend on any arena.
     pub const UNIT: Self = {
         let buf: [u8; 14] = [b'u', b'n', b'i', b't', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Term(Handle::Atom(TinyArray { bytes: buf, len: 4 }))
+        Self(Handle::Atom(TinyArray { bytes: buf, len: 4 }))
     };
 
     /// Constant representing the empty list (nil).  Internally this is
@@ -229,7 +275,25 @@ impl Term {
     /// freely and does not depend on any arena.
     pub const NIL: Self = {
         let buf: [u8; 14] = [b'n', b'i', b'l', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Term(Handle::Atom(TinyArray { bytes: buf, len: 3 }))
+        Self(Handle::Atom(TinyArray { bytes: buf, len: 3 }))
+    };
+
+    /// Constant representing list functor (atom).
+    pub const LIST: Self = {
+        let buf: [u8; 14] = [b'l', b'i', b's', b't', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        Self(Handle::Atom(TinyArray { bytes: buf, len: 4 }))
+    };
+
+    /// Constant representing improper list functor (atom).
+    pub const LISTC: Self = {
+        let buf: [u8; 14] = [b'l', b'i', b's', b't', b'c', 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        Self(Handle::Atom(TinyArray { bytes: buf, len: 5 }))
+    };
+
+    /// Constant representing tuple functor (atom).
+    pub const TUPLE: Self = {
+        let buf: [u8; 14] = [b't', b'u', b'p', b'l', b'e', 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        Self(Handle::Atom(TinyArray { bytes: buf, len: 5 }))
     };
 
     /// Produce a [`View`] of this term that borrows from the given
@@ -237,54 +301,69 @@ impl Term {
     /// dereferences indexes into the arena to yield structured
     /// references.  See [`View`] for details.
     #[inline(always)]
-    pub fn view<'a>(&'a self, arena: &'a Arena) -> View<'a> {
+    pub fn view<'a>(&'a self, arena: &'a Arena) -> Result<View<'a>, TermError> {
         match &self.0 {
-            Handle::Int(i) => View::Int(*i),
-            Handle::Real(f) => View::Real(*f),
-            Handle::Date(d) => View::Date(*d),
+            Handle::Int(i) => Ok(View::Int(*i)),
+            Handle::Real(f) => Ok(View::Real(*f)),
+            Handle::Date(d) => Ok(View::Date(*d)),
             Handle::Var(vs) => {
                 let s_bytes = &vs.bytes[..vs.len as usize];
                 let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in variable");
-                View::Var(s)
+                Ok(View::Var(s))
             }
             Handle::VarRef(vr) => {
+                if arena.id != vr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
                 let name = arena.var_name(VarId(vr.index));
-                View::Var(name)
+                Ok(View::Var(name))
             }
             Handle::Atom(a) => {
                 let s_bytes = &a.bytes[..a.len as usize];
                 let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in atom");
-                View::Atom(s)
+                Ok(View::Atom(s))
             }
             Handle::AtomRef(ar) => {
+                if arena.id != ar.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
                 let name = arena.atom_name(AtomId(ar.index));
-                View::Atom(name)
+                Ok(View::Atom(name))
             }
             Handle::Str(ss) => {
                 let s_bytes = &ss.bytes[..ss.len as usize];
                 let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in string");
-                View::Str(s)
+                Ok(View::Str(s))
             }
             Handle::StrRef(sr) => {
+                if arena.id != sr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
                 let slice = arena.str_slice(StrSlice {
                     index: sr.index,
                     len: sr.len,
                 });
                 let s = core::str::from_utf8(slice).expect("invalid UTF8 in string");
-                View::Str(s)
+                Ok(View::Str(s))
             }
             Handle::Bin(bs) => {
                 let b = &bs.bytes[..bs.len as usize];
-                View::Bin(b)
+                Ok(View::Bin(b))
             }
             Handle::BinRef(br) => {
+                if arena.id != br.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
                 let slice = arena.bin_slice(BinSlice {
                     index: br.index,
                     len: br.len,
                 });
-                View::Bin(slice)
+                Ok(View::Bin(slice))
             }
             Handle::FuncRef(fr) => {
+                if arena.id != fr.arena_id {
+                    return Err(TermError::ArenaMismatch(arena.id, *self));
+                }
                 let slice = arena.term_slice(TermSlice {
                     index: fr.index,
                     len: fr.len,
@@ -299,8 +378,26 @@ impl Term {
                     _ => panic!("invalid functor"),
                 };
                 let args = &slice[1..];
-                View::Func(arena, functor, args)
+                Ok(View::Func(arena, functor, args))
             }
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_inline(&self) -> bool {
+        match &self.0 {
+            Handle::Int(_)
+            | Handle::Real(_)
+            | Handle::Date(_)
+            | Handle::Atom(_)
+            | Handle::Var(_)
+            | Handle::Str(_)
+            | Handle::Bin(_) => true,
+            Handle::AtomRef(_)
+            | Handle::VarRef(_)
+            | Handle::StrRef(_)
+            | Handle::BinRef(_)
+            | Handle::FuncRef(_) => false,
         }
     }
 
@@ -312,6 +409,26 @@ impl Term {
     #[inline(always)]
     pub fn is_atom(&self) -> bool {
         matches!(self.0, Handle::Atom(_) | Handle::AtomRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_var(&self) -> bool {
+        matches!(self.0, Handle::Var(_) | Handle::VarRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_number(&self) -> bool {
+        matches!(self.0, Handle::Int(_) | Handle::Real(_) | Handle::Date(_))
+    }
+
+    #[inline(always)]
+    pub fn is_str(&self) -> bool {
+        matches!(self.0, Handle::Str(_) | Handle::StrRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_bin(&self) -> bool {
+        matches!(self.0, Handle::Bin(_) | Handle::BinRef(_))
     }
 
     #[inline(always)]
@@ -334,13 +451,21 @@ impl fmt::Debug for Term {
                     core::str::from_utf8(&v.bytes[..v.len as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("Var").field("name", &name).finish()
             }
-            Handle::VarRef(v) => f.debug_struct("VarRef").field("index", &v.index).finish(),
+            Handle::VarRef(v) => f
+                .debug_struct("VarRef")
+                .field("arena_id", &v.arena_id)
+                .field("index", &v.index)
+                .finish(),
             Handle::Atom(a) => {
                 let name =
                     core::str::from_utf8(&a.bytes[..a.len as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("Atom").field("name", &name).finish()
             }
-            Handle::AtomRef(a) => f.debug_struct("AtomRef").field("index", &a.index).finish(),
+            Handle::AtomRef(a) => f
+                .debug_struct("AtomRef")
+                .field("arena_id", &a.arena_id)
+                .field("index", &a.index)
+                .finish(),
             Handle::Str(s) => {
                 let value =
                     core::str::from_utf8(&s.bytes[..s.len as usize]).unwrap_or("<invalid utf8>");
@@ -348,6 +473,7 @@ impl fmt::Debug for Term {
             }
             Handle::StrRef(r) => f
                 .debug_struct("StrRef")
+                .field("arena_id", &r.arena_id)
                 .field("index", &r.index)
                 .field("len", &r.len)
                 .finish(),
@@ -357,11 +483,13 @@ impl fmt::Debug for Term {
             }
             Handle::BinRef(br) => f
                 .debug_struct("BinRef")
+                .field("arena_id", &br.arena_id)
                 .field("index", &br.index)
                 .field("len", &br.len)
                 .finish(),
             Handle::FuncRef(fr) => f
                 .debug_struct("Func")
+                .field("arena_id", &fr.arena_id)
                 .field("index", &fr.index)
                 .field("len", &fr.len)
                 .finish(),
@@ -430,14 +558,16 @@ pub struct Arena {
     /// Randomly generated arena identifier.
     /// Terms referencing an arena include this ID, which is later used to verify  
     /// that they correspond to the correct arena when the term value is retrieved.
-    id: u32,
+    id: ArenaID,
     /// Interned atom names.  Uses an `IndexSet` to assign a stable
     /// index to each unique atom.  Names can be retrieved by index
     /// without storing a separate `Vec` of names.
     atoms: IndexSet<String>,
+    atom_alloc_count: usize,
     /// Interned variable names.  Similar to `atoms`, this assigns a
     /// stable index to each unique variable name.
     vars: IndexSet<String>,
+    var_alloc_count: usize,
     /// Interned string data stored contiguously.  Long UTF‑8 strings
     /// are appended to this vector and referenced by index/length.
     string_data: Vec<u8>,
@@ -451,14 +581,150 @@ pub struct Arena {
     terms: Vec<Term>,
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArenaID(u32);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ArenaStats {
+    pub arena_id: ArenaID,
+    pub atoms: usize,
+    pub atom_allocs: usize,
+    pub vars: usize,
+    pub var_allocs: usize,
+    pub str_bytes: usize,
+    pub bin_bytes: usize,
+    pub terms: usize,
+}
+
 impl Arena {
     /// Create a new, empty arena.
     pub fn new() -> Self {
         Self {
-            id: rand::random(),
+            id: ArenaID(rand::random()),
             ..Self::default()
         }
     }
+
+    /// Returns stats.
+    pub fn stats(&self) -> ArenaStats {
+        ArenaStats {
+            arena_id: self.id,
+            atoms: self.atoms.len(),
+            atom_allocs: self.atom_alloc_count,
+            vars: self.vars.len(),
+            var_allocs: self.var_alloc_count,
+            str_bytes: self.string_data.len(),
+            bin_bytes: self.bin_data.len(),
+            terms: self.terms.len(),
+        }
+    }
+
+    /// Produce a [`View`] of the given `term` that borrows from
+    /// this [`Arena`].  This method decodes any inlined bytes and
+    /// dereferences indexes into the arena to yield structured
+    /// references.  See [`View`] for details.
+    #[inline(always)]
+    pub fn view<'a>(&'a self, term: &'a Term) -> Result<View<'a>, TermError> {
+        term.view(self)
+    }
+
+    /// Construct a new integer term.  The full 64 bit two's complement
+    /// representation of `i` is stored in the payload.  No truncation
+    /// occurs.
+    #[inline(always)]
+    pub fn int(&mut self, i: i64) -> Term {
+        Term::int(i)
+    }
+
+    /// Construct a new floating point term.  The full 64 bit IEEE‑754
+    /// bit pattern is stored in the payload without truncation.
+    #[inline(always)]
+    pub fn real(&mut self, r: f64) -> Term {
+        Term::real(r)
+    }
+
+    /// Construct a new date term representing a Unix epoch in
+    /// milliseconds.
+    #[inline(always)]
+    pub fn date(&mut self, ms: i64) -> Term {
+        Term::date(ms)
+    }
+
+    /// Construct or intern an atom into the arena and produce a term
+    /// referencing it.  Small atom names (≤14 bytes of UTF‑8) are
+    /// inlined directly into the handle; longer names are interned
+    /// into the arena and referenced by index and length.
+    #[inline(always)]
+    pub fn atom(&mut self, name: &str) -> Term {
+        Term::atom(self, name)
+    }
+
+    /// Construct or intern a variable into the arena and produce a
+    /// term referencing it.  Small variable names (≤14 bytes) are
+    /// inlined directly into the handle; longer names are interned in
+    /// the arena and referenced by index.
+    #[inline(always)]
+    pub fn var(&mut self, name: &str) -> Term {
+        Term::var(self, name)
+    }
+
+    /// Construct or intern a UTF‑8 string into the arena and produce a
+    /// term referencing it.  Strings longer than 14 bytes are interned
+    /// in the arena; shorter strings are inlined.  Invalid UTF‑8 will
+    /// result in an error.
+    #[inline(always)]
+    pub fn str(&mut self, s: &str) -> Term {
+        Term::str(self, s)
+    }
+
+    /// Construct or intern a binary blob into the arena and produce a
+    /// term referencing it.  Blobs longer than 14 bytes are interned
+    /// in the arena; shorter blobs are inlined.
+    #[inline(always)]
+    pub fn bin(&mut self, bytes: &[u8]) -> Term {
+        Term::bin(self, bytes)
+    }
+
+    /// Construct a new compound term by interning the functor and
+    /// arguments in the arena.  The returned term references a slice
+    /// in the arena's term storage consisting of the functor atom as
+    /// the first entry followed by the argument handles.  A functor of
+    /// arity zero results in an atom.
+    #[inline(always)]
+    pub fn func(&mut self, functor: &str, args: &[Term]) -> Term {
+        Term::func(self, functor, args)
+    }
+
+    pub fn list(&mut self, terms: &[Term]) -> Term {
+        Term::list(self, terms)
+    }
+
+    pub fn listc(&mut self, terms: &[Term], tail: &Term) -> Term {
+        Term::listc(self, terms, tail)
+    }
+
+    pub fn tuple(&mut self, terms: &[Term]) -> Term {
+        Term::tuple(self, terms)
+    }
+
+    /// Constant representing the zero‑arity tuple (unit).  Internally
+    /// this is the atom `"unit"` encoded as a small atom.  It may
+    /// be copied freely and does not depend on any arena.
+    pub const UNIT: Term = Term::UNIT;
+
+    /// Constant representing the empty list (nil).  Internally this is
+    /// the atom `"nil"` encoded as a small atom.  It may be copied
+    /// freely and does not depend on any arena.
+    pub const NIL: Term = Term::NIL;
+
+    /// Constant representing list functor (atom).
+    pub const LIST: Term = Term::LIST;
+
+    /// Constant representing improper list functor (atom).
+    pub const LISTC: Term = Term::LISTC;
+
+    /// Constant representing tuple functor (atom).
+    pub const TUPLE: Term = Term::TUPLE;
 
     /// Intern an atom and return its id.  Reusing the same atom
     /// repeatedly avoids additional allocations.  This uses an
@@ -468,7 +734,11 @@ impl Arena {
         // value already exists the existing index is returned.  The
         // boolean indicates whether a new entry was inserted but is
         // unused here.
-        let (index, _) = self.atoms.insert_full(name.into());
+        let name: String = name.into();
+        if !name.is_inline() {
+            self.atom_alloc_count += 1;
+        }
+        let (index, _) = self.atoms.insert_full(name);
         AtomId(index as u32)
     }
 
@@ -476,7 +746,11 @@ impl Arena {
     /// separate namespace from atoms.  Uses an `IndexSet` to assign
     /// stable indices to unique variable names.
     fn intern_var(&mut self, name: &str) -> VarId {
-        let (index, _) = self.vars.insert_full(name.into());
+        let name: String = name.into();
+        if !name.is_inline() {
+            self.var_alloc_count += 1;
+        }
+        let (index, _) = self.vars.insert_full(name);
         VarId(index as u32)
     }
 
@@ -534,6 +808,18 @@ impl Arena {
         TermSlice { index, len }
     }
 
+    /// Intern a compound term slice plus one term (functor + args + term) into the term arena.
+    fn intern_func_plus_one(&mut self, functor: Term, args: &[Term], tail: Term) -> TermSlice {
+        let index = self.terms.len() as u32;
+        // Reserve space to avoid multiple reallocations when pushing.
+        self.terms.reserve(args.len() + 2);
+        self.terms.push(functor);
+        self.terms.extend_from_slice(args);
+        self.terms.push(tail);
+        let len = (args.len() + 2) as u32;
+        TermSlice { index, len }
+    }
+
     /// Borrow a UTF‑8 string slice stored in the arena.  This function
     /// should not be called directly by users; instead use
     /// [`Term::view`].
@@ -588,7 +874,24 @@ struct TermSlice {
 
 /// Errors that may occur when constructing terms.
 #[derive(Debug, Clone)]
-pub enum Error {}
+pub enum TermError {
+    /// The term comes from a different arena.
+    ArenaMismatch(ArenaID, Term),
+}
+
+impl fmt::Display for TermError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TermError::ArenaMismatch(arena_id, term) => write!(
+                f,
+                "The term comes from a different arena: arena {:?}, term {:?}",
+                arena_id, term
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TermError {}
 
 impl<'a> PartialEq for View<'a> {
     fn eq(&self, other: &Self) -> bool {
@@ -623,10 +926,10 @@ impl<'a> PartialEq for View<'a> {
                 if functor_a != functor_b {
                     return false;
                 }
-                args_a
-                    .iter()
-                    .zip(args_b.iter())
-                    .all(|(a, b)| a.view(arena_a) == b.view(arena_b))
+                args_a.iter().zip(args_b.iter()).all(|(a, b)| {
+                    a.view(arena_a).expect("arena mismatch")
+                        == b.view(arena_b).expect("arena mismatch")
+                })
             }
             _ => unreachable!(),
         }
@@ -676,11 +979,12 @@ impl core::cmp::Ord for View<'_> {
                 if ord != Ordering::Equal {
                     return ord;
                 }
-                for (arg_a, arg_b) in args_a
-                    .iter()
-                    .zip(args_b.iter())
-                    .map(|(a, b)| (a.view(arena_a), b.view(arena_b)))
-                {
+                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()).map(|(a, b)| {
+                    (
+                        a.view(arena_a).expect("arena mismatch"),
+                        b.view(arena_b).expect("arena mismatch"),
+                    )
+                }) {
                     let ord = arg_a.cmp(&arg_b);
                     if ord != Ordering::Equal {
                         return ord;
@@ -808,7 +1112,7 @@ mod tests {
         let a1 = Term::atom(&mut arena, "foo");
         let a2 = Term::atom(&mut arena, "foo");
         assert_eq!(a1, a2);
-        if let View::Atom(name) = a1.view(&arena) {
+        if let Ok(View::Atom(name)) = a1.view(&arena) {
             assert_eq!(name, "foo");
         } else {
             panic!("wrong view");
@@ -830,13 +1134,30 @@ mod tests {
         let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], list![&mut arena; a, b; c]];
         dbg!(&p);
         dbg!(p.view(&arena));
+        dbg!(arena.stats());
         assert!(p.is_func());
-        if let View::Func(_, functor, args) = p.view(&arena) {
+        if let Ok(View::Func(_, functor, args)) = p.view(&arena) {
             assert_eq!(functor, "foo");
             assert_eq!(p.arity(), 6);
             assert_eq!(args.len(), 6);
         } else {
             panic!("unexpected view");
         }
+    }
+
+    #[test]
+    fn view_construction() {
+        let mut a1 = Arena::new();
+        let mut a2 = Arena::new();
+        let x = a1.atom("Hello, hello, quite long long string, world! X");
+        let y = a2.str("Hello, hello, quite long long string, world! Y");
+        dbg!(a1.view(&y));
+        dbg!(a1.view(&x));
+        dbg!(a1.stats());
+        dbg!(a2.stats());
+        let p = list![&mut a1; x, y];
+        dbg!(p);
+        let v = a1.view(&p);
+        dbg!(v);
     }
 }
