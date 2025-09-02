@@ -34,23 +34,21 @@ use indexmap::IndexSet;
 // variables.  Long names or sequences store an index and size into
 // the appropriate arena.
 
-/// A small inlined representation for names or data up to 14 bytes.
-///
-/// This single struct is used for atoms, variables, strings and binaries
-/// when their data can be inlined directly into the term handle.  It
-/// stores the bytes and the length of the valid prefix.
 #[derive(Copy, Clone, PartialEq)]
 struct Small {
     bytes: [u8; 14],
     size: u8,
 }
 
-/// A generic slice reference used for long atoms, variables, strings,
-/// binaries and compound terms.  It contains an offset/index into the
-/// arena and the length of the slice.
+#[derive(Copy, Clone, PartialEq)]
+struct Index {
+    arena_id: u32,
+    index: u32,
+}
+
 #[derive(Copy, Clone, PartialEq)]
 struct Slice {
-    arena_id: u32, // Randomly generated arena id
+    arena_id: u32,
     index: u32,
     size: u32,
 }
@@ -68,14 +66,14 @@ enum TermHandle {
     Real(f64),
     Date(i64),
     VarSmall(Small),
-    VarRef(Slice),
+    VarRef(Index),
     AtomSmall(Small),
-    AtomRef(Slice),
+    AtomRef(Index),
     StrSmall(Small),
     StrRef(Slice),
     BinSmall(Small),
     BinRef(Slice),
-    Func(Slice),
+    FuncRef(Slice),
 }
 
 /// A compact, copyable handle referencing a term stored in a [`TermArena`].
@@ -130,11 +128,9 @@ impl Term {
             }))
         } else {
             let id = arena.intern_atom(name);
-            let len = bytes.len() as u32;
-            Term(TermHandle::AtomRef(Slice {
+            Term(TermHandle::AtomRef(Index {
                 arena_id: arena.id,
                 index: id.0,
-                size: len,
             }))
         }
     }
@@ -155,11 +151,9 @@ impl Term {
             }))
         } else {
             let id = arena.intern_var(name);
-            let len = bytes.len() as u32;
-            Term(TermHandle::VarRef(Slice {
+            Term(TermHandle::VarRef(Index {
                 arena_id: arena.id,
                 index: id.0,
-                size: len,
             }))
         }
     }
@@ -223,7 +217,7 @@ impl Term {
         }
         let functor_term = Term::atom(arena, functor);
         let slice = arena.intern_func(functor_term, args);
-        Ok(Term(TermHandle::Func(Slice {
+        Ok(Term(TermHandle::FuncRef(Slice {
             arena_id: arena.id,
             index: slice.offset,
             size: slice.len,
@@ -304,7 +298,7 @@ impl Term {
                 });
                 TermView::Bin(slice)
             }
-            TermHandle::Func(fr) => {
+            TermHandle::FuncRef(fr) => {
                 let slice = arena.term_slice(TermSlice {
                     offset: fr.index,
                     len: fr.size,
@@ -324,10 +318,22 @@ impl Term {
         }
     }
 
-    /// Convenience method to test if this term is a compound (function).
     #[inline(always)]
-    pub fn is_func(self) -> bool {
-        matches!(self.0, TermHandle::Func(_))
+    pub fn is_func(&self) -> bool {
+        matches!(self.0, TermHandle::FuncRef(_))
+    }
+
+    #[inline(always)]
+    pub fn is_atom(&self) -> bool {
+        matches!(self.0, TermHandle::AtomSmall(_) | TermHandle::AtomRef(_))
+    }
+
+    #[inline(always)]
+    pub fn arity(&self) -> usize {
+        match &self.0 {
+            TermHandle::FuncRef(Slice { size: n, .. }) => (n - 1) as usize,
+            _ => 0,
+        }
     }
 }
 
@@ -342,21 +348,13 @@ impl fmt::Debug for Term {
                     core::str::from_utf8(&v.bytes[..v.size as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("VarSmall").field("name", &name).finish()
             }
-            TermHandle::VarRef(v) => f
-                .debug_struct("VarRef")
-                .field("index", &v.index)
-                .field("size", &v.size)
-                .finish(),
+            TermHandle::VarRef(v) => f.debug_struct("VarRef").field("index", &v.index).finish(),
             TermHandle::AtomSmall(a) => {
                 let name =
                     core::str::from_utf8(&a.bytes[..a.size as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("AtomSmall").field("name", &name).finish()
             }
-            TermHandle::AtomRef(a) => f
-                .debug_struct("AtomRef")
-                .field("index", &a.index)
-                .field("size", &a.size)
-                .finish(),
+            TermHandle::AtomRef(a) => f.debug_struct("AtomRef").field("index", &a.index).finish(),
             TermHandle::StrSmall(s) => {
                 let value =
                     core::str::from_utf8(&s.bytes[..s.size as usize]).unwrap_or("<invalid utf8>");
@@ -376,7 +374,7 @@ impl fmt::Debug for Term {
                 .field("index", &br.index)
                 .field("size", &br.size)
                 .finish(),
-            TermHandle::Func(fr) => f
+            TermHandle::FuncRef(fr) => f
                 .debug_struct("Func")
                 .field("index", &fr.index)
                 .field("size", &fr.size)
@@ -757,17 +755,17 @@ macro_rules! list {
         $crate::Term::NIL
     };
     // proper list with tail omitted
-    ( & $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
+    ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
         {
             let elems = &[$($elem),+];
-            $crate::Term::func($arena, "list", elems)
+            $crate::Term::func(&mut $arena, "list", elems)
         }
     };
     // improper list with explicit tail
-    ( & $arena:expr ; $( $elem:tt ),+ | $tail:expr $(,)? ) => {
+    ( &mut $arena:expr ; $( $elem:expr ),+ ; $tail:expr $(,)? ) => {
         {
             let elems = &[$($elem),+, $tail];
-            $crate::Term::func($arena, "listc", elems)
+            $crate::Term::func(&mut $arena, "listc", elems)
         }
     };
 }
@@ -781,10 +779,10 @@ macro_rules! tuple {
     () => {
         $crate::Term::UNIT
     };
-    ( & $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
+    ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
         {
             let elems = &[$($elem),+];
-            $crate::Term::func($arena, "tuple", elems)
+            $crate::Term::func(&mut $arena, "tuple", elems)
         }
     };
 }
@@ -798,9 +796,9 @@ macro_rules! tuple {
 /// arity is zero the macro will return an error via a panic.
 #[macro_export]
 macro_rules! func {
-    ( & $arena:expr ; $functor:expr ; $( $arg:expr ),+ $(,)? ) => {{
+    ( &mut $arena:expr ; $functor:expr ; $( $arg:expr ),+ $(,)? ) => {{
         let args: &[_] = &[$($arg),+];
-        $crate::Term::func($arena, $functor, args)
+        $crate::Term::func(&mut $arena, $functor, args)
     }};
 }
 
@@ -831,12 +829,21 @@ mod tests {
         let mut arena = TermArena::new();
         let a = Term::int(1);
         let b = Term::real(2.0);
-        let p = Term::func(&mut arena, "point", &[a, b]).unwrap();
+        let c = Term::date(1000);
+        let d = Term::atom(&mut arena, "hello");
+        let e = Term::var(&mut arena, "Hello, hello, world!");
+        let f = Term::str(&mut arena, "A str\ning.");
+        let g = list![&mut arena; d, e, f].unwrap();
+        let h = tuple![&mut arena; f].unwrap();
+        let p = Term::func(&mut arena, "point", &[a, b, c, d, e, f, g, h]).unwrap();
+        let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], list![&mut arena; a, b; c].unwrap()].unwrap();
+        dbg!(&p);
         dbg!(p.view(&arena));
         assert!(p.is_func());
         if let TermView::Func(_, functor, args) = p.view(&arena) {
-            assert_eq!(functor, "point");
-            assert_eq!(args.len(), 2);
+            assert_eq!(functor, "foo");
+            assert_eq!(p.arity(), 6);
+            assert_eq!(args.len(), 6);
         } else {
             panic!("unexpected view");
         }
