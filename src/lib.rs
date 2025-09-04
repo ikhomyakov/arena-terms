@@ -1369,12 +1369,10 @@ macro_rules! list {
         $crate::Term::NIL
     };
     // proper list
-    ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
-        {
-            let elems = &[$($elem),+];
-            $crate::Term::list(&mut $arena, elems)
-        }
-    };
+    ( $arena:expr ; $( $elem:expr ),+ $(,)? ) => {{
+        let terms = &[ $( $elem.into_term($arena) ),+ ];
+        $crate::Term::list($arena, terms)
+    }};
 }
 
 /// Construct an improper list from a sequence of terms
@@ -1382,12 +1380,10 @@ macro_rules! list {
 #[macro_export]
 macro_rules! listc {
     // improper list with explicit tail
-    ( &mut $arena:expr ; $( $elem:expr ),+ ; $tail:expr $(,)? ) => {
-        {
-            let elems = &[$($elem),+];
-            $crate::Term::listc(&mut $arena, elems, &$tail)
-        }
-    };
+    ( $arena:expr ; $( $elem:expr ),+ ; $tail:expr $(,)? ) => {{
+        let terms = &[ $( $elem.into_term($arena) ),+ ];
+        $crate::Term::listc($arena, terms, $tail)
+    }};
 }
 
 /// Construct a tuple from a sequence of terms.  A 0‑tuple is
@@ -1399,12 +1395,10 @@ macro_rules! tuple {
     () => {
         $crate::Term::UNIT
     };
-    ( &mut $arena:expr ; $( $elem:expr ),+ $(,)? ) => {
-        {
-            let elems = &[$($elem),+];
-            $crate::Term::tuple(&mut $arena, elems)
-        }
-    };
+    ( $arena:expr ; $( $elem:expr ),+ $(,)? ) => {{
+        let terms = &[ $( $elem.into_term($arena) ),+ ];
+        $crate::Term::tuple($arena, terms)
+    }};
 }
 
 /// Construct a compound term from a functor name and arguments.
@@ -1416,9 +1410,9 @@ macro_rules! tuple {
 /// arity is zero the macro will return an error via a panic.
 #[macro_export]
 macro_rules! func {
-    ( &mut $arena:expr ; $functor:expr ; $( $arg:expr ),+ $(,)? ) => {{
-        let args: &[_] = &[$($arg),+];
-        $crate::Term::func(&mut $arena, $functor, args)
+    ( $arena:expr ; $functor:expr ; $( $arg:expr ),+ $(,)? ) => {{
+        let terms = &[ $( $arg.into_term($arena) ),+ ];
+        $crate::Term::func($arena, $functor, terms)
     }};
 }
 
@@ -1523,12 +1517,12 @@ mod tests {
         let x6 = Term::func(&mut a1, "x", (5..=6).map(|x| x as f64));
         let x7 = Term::func(&mut a1, "x", vec![&x1, &x2, &x3]);
         let x8 = Term::func(&mut a1, "x", &[x1, x2, x3]);
+        let x9 = func!(&mut a1; String::from("aaa"); x1, 1, 2.0, "x", "X");
         assert!(x1.arity() == 1);
         assert!(x2.arity() == 1);
         assert!(x3.arity() == 1);
         assert!(x4.arity() == 1);
-        dbg!(a1.view(&x5));
-        dbg!(a1.view(&x6));
+        dbg!(a1.view(&x9));
         dbg!(a1.stats());
     }
 }
