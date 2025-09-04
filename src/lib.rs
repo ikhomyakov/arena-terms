@@ -17,6 +17,8 @@
 use core::fmt;
 use indexmap::IndexSet;
 use smartstring::alias::String;
+use std::borrow::Borrow;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 // The following type definitions describe the internal representation
@@ -83,37 +85,141 @@ enum Handle {
 #[derive(Copy, Clone, PartialEq)]
 pub struct Term(Handle);
 
+impl AsRef<Term> for Term {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+macro_rules! impl_from_integers_for_term {
+    ($($t:ty),* $(,)?) => {$(
+        impl From<$t> for Term {
+            #[inline]
+            fn from(v: $t) -> Self { Term::int(v as i64) }
+        }
+    )*};
+}
+impl_from_integers_for_term!(i8, i16, i32, i64, u8, u16, u32);
+
+macro_rules! impl_from_floats_for_term {
+    ($($t:ty),* $(,)?) => {$(
+        impl From<$t> for Term {
+            #[inline]
+            fn from(v: $t) -> Self { Term::real(v as f64) }
+        }
+    )*};
+}
+impl_from_floats_for_term!(f32, f64);
+
+pub trait IntoTerm {
+    fn into_term(self, arena: &mut Arena) -> Term;
+}
+
+macro_rules! impl_intoterm_for_integers {
+    ($($t:ty),* $(,)?) => {$(
+        impl IntoTerm for $t {
+            #[inline]
+            fn into_term(self, _arena: &mut Arena) -> Term { Term::int(self as i64) }
+        }
+    )*};
+}
+impl_intoterm_for_integers!(i8, i16, i32, i64, u8, u16, u32);
+
+macro_rules! impl_intoterm_for_floats {
+    ($($t:ty),* $(,)?) => {$(
+        impl IntoTerm for $t {
+            #[inline]
+            fn into_term(self, _arena: &mut Arena) -> Term { Term::real(self as f64) }
+        }
+    )*};
+}
+impl_intoterm_for_floats!(f32, f64);
+
+impl<'a> IntoTerm for &'a str {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
+            Term::var(arena, self)
+        } else {
+            Term::atom(arena, self)
+        }
+    }
+}
+
+impl<'a> IntoTerm for Cow<'a, str> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        match self {
+            Cow::Borrowed(s) => Term::str(arena, s),
+            Cow::Owned(s) => Term::str(arena, s),
+        }
+    }
+}
+
+impl IntoTerm for String {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
+            Term::var(arena, &self)
+        } else {
+            Term::atom(arena, &self)
+        }
+    }
+}
+
+impl IntoTerm for std::string::String {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
+            Term::var(arena, &self)
+        } else {
+            Term::atom(arena, &self)
+        }
+    }
+}
+
+impl<T> IntoTerm for T
+where
+    T: Borrow<Term>,
+{
+    #[inline]
+    fn into_term(self, _arena: &mut Arena) -> Term {
+        *self.borrow()
+    }
+}
+
 impl Term {
     /// Construct a new integer term.  The full 64 bit two's complement
     /// representation of `i` is stored in the payload.  No truncation
     /// occurs.
-    #[inline(always)]
-    pub fn int(i: i64) -> Self {
-        Self(Handle::Int(i))
+    #[inline]
+    pub fn int(i: impl Into<i64>) -> Self {
+        Self(Handle::Int(i.into()))
     }
 
     /// Construct a new floating point term.  The full 64 bit IEEE‑754
     /// bit pattern is stored in the payload without truncation.
-    #[inline(always)]
-    pub fn real(f: f64) -> Self {
-        Self(Handle::Real(f))
+    #[inline]
+    pub fn real(f: impl Into<f64>) -> Self {
+        Self(Handle::Real(f.into()))
     }
 
     /// Construct a new date term representing a Unix epoch in
     /// milliseconds.  Dates share the same underlying storage as
     /// integers but use a distinct tag so they do not compare equal
     /// with integer terms.
-    #[inline(always)]
-    pub fn date(ms: i64) -> Self {
-        Self(Handle::Date(ms))
+    #[inline]
+    pub fn date(ms: impl Into<i64>) -> Self {
+        Self(Handle::Date(ms.into()))
     }
 
     /// Construct or intern an atom into the arena and produce a term
     /// referencing it.  Small atom names (≤14 bytes of UTF‑8) are
     /// inlined directly into the handle; longer names are interned
     /// into the arena and referenced by index and length.
-    #[inline(always)]
-    pub fn atom(arena: &mut Arena, name: &str) -> Self {
+    #[inline]
+    pub fn atom(arena: &mut Arena, name: impl AsRef<str>) -> Self {
+        let name = name.as_ref();
         let bytes = name.as_bytes();
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
@@ -135,8 +241,9 @@ impl Term {
     /// term referencing it.  Small variable names (≤14 bytes) are
     /// inlined directly into the handle; longer names are interned in
     /// the arena and referenced by index.
-    #[inline(always)]
-    pub fn var(arena: &mut Arena, name: &str) -> Self {
+    #[inline]
+    pub fn var(arena: &mut Arena, name: impl AsRef<str>) -> Self {
+        let name = name.as_ref();
         let bytes = name.as_bytes();
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
@@ -158,8 +265,9 @@ impl Term {
     /// term referencing it.  Strings longer than 14 bytes are interned
     /// in the arena; shorter strings are inlined.  Invalid UTF‑8 will
     /// result in an error.
-    #[inline(always)]
-    pub fn str(arena: &mut Arena, s: &str) -> Self {
+    #[inline]
+    pub fn str(arena: &mut Arena, s: impl AsRef<str>) -> Self {
+        let s = s.as_ref();
         let bytes = s.as_bytes();
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
@@ -181,8 +289,9 @@ impl Term {
     /// Construct or intern a binary blob into the arena and produce a
     /// term referencing it.  Blobs longer than 14 bytes are interned
     /// in the arena; shorter blobs are inlined.
-    #[inline(always)]
-    pub fn bin(arena: &mut Arena, bytes: &[u8]) -> Self {
+    #[inline]
+    pub fn bin(arena: &mut Arena, bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
         if bytes.len() <= 14 {
             let mut buf = [0u8; 14];
             buf[..bytes.len()].copy_from_slice(bytes);
@@ -205,13 +314,18 @@ impl Term {
     /// in the arena's term storage consisting of the functor atom as
     /// the first entry followed by the argument handles.  A functor of
     /// arity zero results in an atom.
-    #[inline(always)]
-    pub fn func(arena: &mut Arena, functor: &str, args: &[Self]) -> Self {
+    #[inline]
+    pub fn func(
+        arena: &mut Arena,
+        functor: impl AsRef<str>,
+        args: impl IntoIterator<Item = impl IntoTerm>,
+    ) -> Self {
         let functor_atom = Self::atom(arena, functor);
-        if args.is_empty() {
+        let mut args = args.into_iter();
+        let Some(first) = args.next() else {
             return functor_atom;
-        }
-        let slice = arena.intern_func(functor_atom, args);
+        };
+        let slice = arena.intern_func(functor_atom, std::iter::once(first).chain(args));
         Self(Handle::FuncRef(Slice {
             arena_id: arena.id,
             index: slice.index,
@@ -221,12 +335,13 @@ impl Term {
 
     /// Constructs a new list. A list is represented as a compound term
     /// with the functor `list`.
-    #[inline(always)]
-    pub fn list(arena: &mut Arena, terms: &[Self]) -> Self {
-        if terms.is_empty() {
+    #[inline]
+    pub fn list(arena: &mut Arena, terms: impl IntoIterator<Item = impl IntoTerm>) -> Self {
+        let mut terms = terms.into_iter();
+        let Some(first) = terms.next() else {
             return Self::NIL;
-        }
-        let slice = arena.intern_seq(terms);
+        };
+        let slice = arena.intern_seq(std::iter::once(first).chain(terms));
         Self(Handle::ListRef(Slice {
             arena_id: arena.id,
             index: slice.index,
@@ -237,12 +352,17 @@ impl Term {
     /// Constructs a new improper list. An improper list is represented as
     /// a compound term with the functor `listc` and additional argument.
     /// If `terms` is empty, returns `nil`.
-    #[inline(always)]
-    pub fn listc(arena: &mut Arena, terms: &[Self], tail: &Self) -> Self {
-        if terms.is_empty() {
+    #[inline]
+    pub fn listc(
+        arena: &mut Arena,
+        terms: impl IntoIterator<Item = impl IntoTerm>,
+        tail: impl IntoTerm,
+    ) -> Self {
+        let mut terms = terms.into_iter();
+        let Some(first) = terms.next() else {
             return Self::NIL;
-        }
-        let slice = arena.intern_seq_plus_one(terms, *tail);
+        };
+        let slice = arena.intern_seq_plus_one(std::iter::once(first).chain(terms), tail);
         Self(Handle::ListCRef(Slice {
             arena_id: arena.id,
             index: slice.index,
@@ -252,12 +372,13 @@ impl Term {
 
     /// Constructs a new tuple. A tuple is represented as a compound term
     /// with the functor `tuple`.
-    #[inline(always)]
-    pub fn tuple(arena: &mut Arena, terms: &[Self]) -> Self {
-        if terms.is_empty() {
+    #[inline]
+    pub fn tuple(arena: &mut Arena, terms: impl IntoIterator<Item = impl IntoTerm>) -> Self {
+        let mut terms = terms.into_iter();
+        let Some(first) = terms.next() else {
             return Self::UNIT;
-        }
-        let slice = arena.intern_seq(terms);
+        };
+        let slice = arena.intern_seq(std::iter::once(first).chain(terms));
         Self(Handle::TupleRef(Slice {
             arena_id: arena.id,
             index: slice.index,
@@ -285,7 +406,7 @@ impl Term {
     /// [`Arena`].  This method decodes any inlined bytes and
     /// dereferences indexes into the arena to yield structured
     /// references.  See [`View`] for details.
-    #[inline(always)]
+    #[inline]
     pub fn view<'a>(&'a self, arena: &'a Arena) -> Result<View<'a>, TermError> {
         match &self.0 {
             Handle::Int(i) => Ok(View::Int(*i)),
@@ -399,7 +520,7 @@ impl Term {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_inline(&self) -> bool {
         match &self.0 {
             Handle::Int(_)
@@ -420,67 +541,67 @@ impl Term {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_func(&self) -> bool {
         matches!(self.0, Handle::FuncRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_list(&self) -> bool {
         matches!(self.0, Handle::ListRef(_)) || *self == Self::NIL
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_listc(&self) -> bool {
         matches!(self.0, Handle::ListCRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_tuple(&self) -> bool {
         matches!(self.0, Handle::TupleRef(_)) || *self == Self::UNIT
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_int(&self) -> bool {
         matches!(self.0, Handle::Int(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_real(&self) -> bool {
         matches!(self.0, Handle::Real(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_date(&self) -> bool {
         matches!(self.0, Handle::Date(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_atom(&self) -> bool {
         matches!(self.0, Handle::Atom(_) | Handle::AtomRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_var(&self) -> bool {
         matches!(self.0, Handle::Var(_) | Handle::VarRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_number(&self) -> bool {
         matches!(self.0, Handle::Int(_) | Handle::Real(_) | Handle::Date(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_str(&self) -> bool {
         matches!(self.0, Handle::Str(_) | Handle::StrRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_bin(&self) -> bool {
         matches!(self.0, Handle::Bin(_) | Handle::BinRef(_))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn arity(&self) -> usize {
         match &self.0 {
             Handle::FuncRef(Slice { len: n, .. }) => (n - 1) as usize,
@@ -718,7 +839,7 @@ impl Arena {
     /// this [`Arena`].  This method decodes any inlined bytes and
     /// dereferences indexes into the arena to yield structured
     /// references.  See [`View`] for details.
-    #[inline(always)]
+    #[inline]
     pub fn view<'a>(&'a self, term: &'a Term) -> Result<View<'a>, TermError> {
         term.view(self)
     }
@@ -726,22 +847,22 @@ impl Arena {
     /// Construct a new integer term.  The full 64 bit two's complement
     /// representation of `i` is stored in the payload.  No truncation
     /// occurs.
-    #[inline(always)]
-    pub fn int(&mut self, i: i64) -> Term {
+    #[inline]
+    pub fn int(&mut self, i: impl Into<i64>) -> Term {
         Term::int(i)
     }
 
     /// Construct a new floating point term.  The full 64 bit IEEE‑754
     /// bit pattern is stored in the payload without truncation.
-    #[inline(always)]
-    pub fn real(&mut self, r: f64) -> Term {
+    #[inline]
+    pub fn real(&mut self, r: impl Into<f64>) -> Term {
         Term::real(r)
     }
 
     /// Construct a new date term representing a Unix epoch in
     /// milliseconds.
-    #[inline(always)]
-    pub fn date(&mut self, ms: i64) -> Term {
+    #[inline]
+    pub fn date(&mut self, ms: impl Into<i64>) -> Term {
         Term::date(ms)
     }
 
@@ -749,8 +870,8 @@ impl Arena {
     /// referencing it.  Small atom names (≤14 bytes of UTF‑8) are
     /// inlined directly into the handle; longer names are interned
     /// into the arena and referenced by index and length.
-    #[inline(always)]
-    pub fn atom(&mut self, name: &str) -> Term {
+    #[inline]
+    pub fn atom(&mut self, name: impl AsRef<str>) -> Term {
         Term::atom(self, name)
     }
 
@@ -758,8 +879,8 @@ impl Arena {
     /// term referencing it.  Small variable names (≤14 bytes) are
     /// inlined directly into the handle; longer names are interned in
     /// the arena and referenced by index.
-    #[inline(always)]
-    pub fn var(&mut self, name: &str) -> Term {
+    #[inline]
+    pub fn var(&mut self, name: impl AsRef<str>) -> Term {
         Term::var(self, name)
     }
 
@@ -767,16 +888,16 @@ impl Arena {
     /// term referencing it.  Strings longer than 14 bytes are interned
     /// in the arena; shorter strings are inlined.  Invalid UTF‑8 will
     /// result in an error.
-    #[inline(always)]
-    pub fn str(&mut self, s: &str) -> Term {
+    #[inline]
+    pub fn str(&mut self, s: impl AsRef<str>) -> Term {
         Term::str(self, s)
     }
 
     /// Construct or intern a binary blob into the arena and produce a
     /// term referencing it.  Blobs longer than 14 bytes are interned
     /// in the arena; shorter blobs are inlined.
-    #[inline(always)]
-    pub fn bin(&mut self, bytes: &[u8]) -> Term {
+    #[inline]
+    pub fn bin(&mut self, bytes: impl AsRef<[u8]>) -> Term {
         Term::bin(self, bytes)
     }
 
@@ -785,20 +906,28 @@ impl Arena {
     /// in the arena's term storage consisting of the functor atom as
     /// the first entry followed by the argument handles.  A functor of
     /// arity zero results in an atom.
-    #[inline(always)]
-    pub fn func(&mut self, functor: &str, args: &[Term]) -> Term {
+    #[inline]
+    pub fn func(
+        &mut self,
+        functor: impl AsRef<str>,
+        args: impl IntoIterator<Item = impl IntoTerm>,
+    ) -> Term {
         Term::func(self, functor, args)
     }
 
-    pub fn list(&mut self, terms: &[Term]) -> Term {
+    pub fn list(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Term {
         Term::list(self, terms)
     }
 
-    pub fn listc(&mut self, terms: &[Term], tail: &Term) -> Term {
+    pub fn listc(
+        &mut self,
+        terms: impl IntoIterator<Item = impl IntoTerm>,
+        tail: impl IntoTerm,
+    ) -> Term {
         Term::listc(self, terms, tail)
     }
 
-    pub fn tuple(&mut self, terms: &[Term]) -> Term {
+    pub fn tuple(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Term {
         Term::tuple(self, terms)
     }
 
@@ -884,35 +1013,56 @@ impl Arena {
     }
 
     /// Intern a compound term slice (functor + args) into the term arena.
-    fn intern_func(&mut self, functor: Term, args: &[Term]) -> TermSlice {
-        let index = self.terms.len() as u32;
-        // Reserve space to avoid multiple reallocations when pushing.
-        self.terms.reserve(args.len() + 1);
+    fn intern_func(
+        &mut self,
+        functor: Term,
+        args: impl IntoIterator<Item = impl IntoTerm>,
+    ) -> TermSlice {
+        let index = self.terms.len();
         self.terms.push(functor);
-        self.terms.extend_from_slice(args);
-        let len = (args.len() + 1) as u32;
-        TermSlice { index, len }
+        for x in args {
+            let t = x.into_term(self);
+            self.terms.push(t);
+        }
+        let len = self.terms.len() - index;
+        TermSlice {
+            index: index as u32,
+            len: len as u32,
+        }
     }
 
     /// Intern a seq term slice into the term arena.
-    fn intern_seq(&mut self, terms: &[Term]) -> TermSlice {
-        let index = self.terms.len() as u32;
-        // Reserve space to avoid multiple reallocations when pushing.
-        self.terms.reserve(terms.len());
-        self.terms.extend_from_slice(terms);
-        let len = terms.len() as u32;
-        TermSlice { index, len }
+    fn intern_seq(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> TermSlice {
+        let index = self.terms.len();
+        for x in terms {
+            let t = x.into_term(self);
+            self.terms.push(t);
+        }
+        let len = self.terms.len() - index;
+        TermSlice {
+            index: index as u32,
+            len: len as u32,
+        }
     }
 
-    /// Intern a seq term slice plus one term into the term arena.
-    fn intern_seq_plus_one(&mut self, terms: &[Term], tail: Term) -> TermSlice {
-        let index = self.terms.len() as u32;
-        // Reserve space to avoid multiple reallocations when pushing.
-        self.terms.reserve(terms.len() + 1);
-        self.terms.extend_from_slice(terms);
-        self.terms.push(tail);
-        let len = (terms.len() + 1) as u32;
-        TermSlice { index, len }
+    /// Intern a seq term slice plus tail into the term arena.
+    fn intern_seq_plus_one(
+        &mut self,
+        terms: impl IntoIterator<Item = impl IntoTerm>,
+        tail: impl IntoTerm,
+    ) -> TermSlice {
+        let index = self.terms.len();
+        for x in terms {
+            let t = x.into_term(self);
+            self.terms.push(t);
+        }
+        let t = tail.into_term(self);
+        self.terms.push(t);
+        let len = self.terms.len() - index;
+        TermSlice {
+            index: index as u32,
+            len: len as u32,
+        }
     }
 
     /// Borrow a UTF‑8 string slice stored in the arena.  This function
@@ -1357,6 +1507,28 @@ mod tests {
         let x = a1.atom("Hello, hello, quite long long string, world! X");
         let p = a1.func("foo", &vec![x; 1_000_000]);
         assert!(p.arity() == 1_000_000);
+        dbg!(a1.stats());
+    }
+
+    #[test]
+    fn interface() {
+        let mut a1 = Arena::new();
+
+        let s = String::from("x");
+        let x1 = Term::func(&mut a1, &s, &vec![Term::date(1000)]);
+        let x2 = Term::func(&mut a1, s.as_str(), vec![Term::date(1000)]);
+        let x3 = Term::func(&mut a1, s, &[Term::date(1000)]);
+        let x4 = Term::func(&mut a1, "x", [Term::date(1000)]);
+        let x5 = Term::func(&mut a1, "x", [x1, x2, x3]);
+        let x6 = Term::func(&mut a1, "x", (5..=6).map(|x| x as f64));
+        let x7 = Term::func(&mut a1, "x", vec![&x1, &x2, &x3]);
+        let x8 = Term::func(&mut a1, "x", &[x1, x2, x3]);
+        assert!(x1.arity() == 1);
+        assert!(x2.arity() == 1);
+        assert!(x3.arity() == 1);
+        assert!(x4.arity() == 1);
+        dbg!(a1.view(&x5));
+        dbg!(a1.view(&x6));
         dbg!(a1.stats());
     }
 }
