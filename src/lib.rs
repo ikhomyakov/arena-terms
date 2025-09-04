@@ -21,6 +21,54 @@ use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
+/// Zero-cost wrapper types that disambiguate primitive inputs when constructing [`Term`]s.
+///
+/// A raw `&str` could mean different things: it might be an atom, a variable, or
+/// a string literal. By introducing distinct wrapper types (`Atom`, `Var`, `Str`),
+/// the intent is explicit at the call site. Numeric and binary values are also
+/// wrapped for the same reason.
+///
+/// These newtypes are all `#[repr(transparent)]` wrappers around primitive Rust
+/// types. They carry no runtime cost but improve readability and type safety
+/// when building terms.
+///
+/// # Example
+///
+/// ```rust
+/// # use terms::{Term, Int, Date, Var, func};
+/// # let mut arena = terms::Arena::new();
+///
+/// // Construct a function term equivalent to foo(1, 1000, X)
+/// let t = func!(arena; "foo"; Int(1), Date(1000), Var("X"));
+/// ```
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Int(i64);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Real(f64);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Date(i64);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Atom<'a>(&'a str);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Var<'a>(&'a str);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Str<'a>(&'a str);
+
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Bin<'a>(&'a [u8]);
+
 // The following type definitions describe the internal representation
 // of a term.  Rather than packing data into a single integer we use
 // a tagged enum to store the various kinds of terms.  Each variant
@@ -91,6 +139,27 @@ impl AsRef<Term> for Term {
     }
 }
 
+impl From<Int> for Term {
+    #[inline]
+    fn from(v: Int) -> Self {
+        Term::int(v.0)
+    }
+}
+
+impl From<Real> for Term {
+    #[inline]
+    fn from(v: Real) -> Self {
+        Term::real(v.0)
+    }
+}
+
+impl From<Date> for Term {
+    #[inline]
+    fn from(v: Date) -> Self {
+        Term::date(v.0)
+    }
+}
+
 macro_rules! impl_from_integers_for_term {
     ($($t:ty),* $(,)?) => {$(
         impl From<$t> for Term {
@@ -115,6 +184,27 @@ pub trait IntoTerm {
     fn into_term(self, arena: &mut Arena) -> Term;
 }
 
+impl IntoTerm for Int {
+    #[inline]
+    fn into_term(self, _arena: &mut Arena) -> Term {
+        Term::int(self.0)
+    }
+}
+
+impl IntoTerm for Real {
+    #[inline]
+    fn into_term(self, _arena: &mut Arena) -> Term {
+        Term::real(self.0)
+    }
+}
+
+impl IntoTerm for Date {
+    #[inline]
+    fn into_term(self, _arena: &mut Arena) -> Term {
+        Term::date(self.0)
+    }
+}
+
 macro_rules! impl_intoterm_for_integers {
     ($($t:ty),* $(,)?) => {$(
         impl IntoTerm for $t {
@@ -135,14 +225,31 @@ macro_rules! impl_intoterm_for_floats {
 }
 impl_intoterm_for_floats!(f32, f64);
 
+impl<'a> IntoTerm for Atom<'a> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::atom(arena, self.0)
+    }
+}
+
+impl<'a> IntoTerm for Var<'a> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::var(arena, self.0)
+    }
+}
+
+impl<'a> IntoTerm for Str<'a> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::str(arena, self.0)
+    }
+}
+
 impl<'a> IntoTerm for &'a str {
     #[inline]
     fn into_term(self, arena: &mut Arena) -> Term {
-        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
-            Term::var(arena, self)
-        } else {
-            Term::atom(arena, self)
-        }
+        Term::str(arena, self)
     }
 }
 
@@ -156,25 +263,34 @@ impl<'a> IntoTerm for Cow<'a, str> {
     }
 }
 
+impl<'a> IntoTerm for Bin<'a> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::bin(arena, self.0)
+    }
+}
+
+impl<'a> IntoTerm for Cow<'a, [u8]> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        match self {
+            Cow::Borrowed(s) => Term::bin(arena, s),
+            Cow::Owned(s) => Term::bin(arena, s),
+        }
+    }
+}
+
 impl IntoTerm for String {
     #[inline]
     fn into_term(self, arena: &mut Arena) -> Term {
-        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
-            Term::var(arena, &self)
-        } else {
-            Term::atom(arena, &self)
-        }
+        Term::str(arena, &self)
     }
 }
 
 impl IntoTerm for std::string::String {
     #[inline]
     fn into_term(self, arena: &mut Arena) -> Term {
-        if self.starts_with(|c: char| c.is_ascii_uppercase() || c == '_') {
-            Term::var(arena, &self)
-        } else {
-            Term::atom(arena, &self)
-        }
+        Term::str(arena, &self)
     }
 }
 
@@ -1334,14 +1450,16 @@ impl core::cmp::Ord for View<'_> {
 fn kind_order(t: &View) -> u8 {
     match t {
         View::Var(_) => 0,
-        View::Int(_) | View::Real(_) | View::Date(_) => 1,
-        View::Atom(_) => 2,
-        View::Str(_) => 3,
-        View::Bin(_) => 4,
-        View::Func(_, _, _) => 5,
-        View::Tuple(_, _) => 6,
-        View::List(_, _) => 7,
-        View::ListC(_, _, _) => 8,
+        View::Real(_) => 1,
+        View::Int(_) => 2,
+        View::Date(_) => 3,
+        View::Atom(_) => 4,
+        View::Str(_) => 5,
+        View::Bin(_) => 6,
+        View::Func(_, _, _) => 7,
+        View::Tuple(_, _) => 8,
+        View::List(_, _) => 9,
+        View::ListC(_, _, _) => 10,
     }
 }
 
@@ -1467,7 +1585,7 @@ mod tests {
         let p = Term::func(&mut arena, "point", &[a, b, c, d, e, f, g, h]);
         let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], listc![&mut arena; a, b; c]];
         dbg!(&p);
-        dbg!(p.view(&arena));
+        dbg!(p.view(&arena).unwrap());
         dbg!(arena.stats());
         assert!(p.is_func());
         if let Ok(View::Func(_, functor, args)) = p.view(&arena) {
@@ -1485,13 +1603,13 @@ mod tests {
         let mut a2 = Arena::new();
         let x = a1.atom("Hello, hello, quite long long string, world! X");
         let y = a2.str("Hello, hello, quite long long string, world! Y");
-        dbg!(a1.view(&y));
-        dbg!(a1.view(&x));
+        dbg!(a1.view(&y).unwrap());
+        dbg!(a1.view(&x).unwrap());
         dbg!(a1.stats());
         dbg!(a2.stats());
         let p = list![&mut a1; x, y];
         dbg!(p);
-        let v = a1.view(&p);
+        let v = a1.view(&p).unwrap();
         dbg!(v);
     }
 
@@ -1506,23 +1624,19 @@ mod tests {
 
     #[test]
     fn interface() {
-        let mut a1 = Arena::new();
+        let a = &mut Arena::new();
 
         let s = String::from("x");
-        let x1 = Term::func(&mut a1, &s, &vec![Term::date(1000)]);
-        let x2 = Term::func(&mut a1, s.as_str(), vec![Term::date(1000)]);
-        let x3 = Term::func(&mut a1, s, &[Term::date(1000)]);
-        let x4 = Term::func(&mut a1, "x", [Term::date(1000)]);
-        let x5 = Term::func(&mut a1, "x", [x1, x2, x3]);
-        let x6 = Term::func(&mut a1, "x", (5..=6).map(|x| x as f64));
-        let x7 = Term::func(&mut a1, "x", vec![&x1, &x2, &x3]);
-        let x8 = Term::func(&mut a1, "x", &[x1, x2, x3]);
-        let x9 = func!(&mut a1; String::from("aaa"); x1, 1, 2.0, "x", "X");
-        assert!(x1.arity() == 1);
-        assert!(x2.arity() == 1);
-        assert!(x3.arity() == 1);
-        assert!(x4.arity() == 1);
-        dbg!(a1.view(&x9));
-        dbg!(a1.stats());
+        let x1 = Term::func(a, &s, &vec![Term::date(1000)]);
+        let x2 = Term::func(a, s.as_str(), vec![Term::date(1000)]);
+        let x3 = Term::func(a, s, &[Term::date(1000)]);
+        let _x4 = Term::func(a, "x", [Term::date(1000)]);
+        let _x5 = Term::func(a, "x", [x1, x2, x3]);
+        let _x6 = Term::func(a, "x", (5..=6).map(|x| x as f64));
+        let _x7 = Term::func(a, "x", vec![&x1, &x2, &x3]);
+        let _x8 = Term::func(a, "x", &[x1, x2, x3]);
+        let x9 = func!(a; String::from("aaa"); x1, 1u8, 1i8, 2.0, "x", "X", Atom("ATOM"), Var("var"), Str("a string") );
+        dbg!(a.view(&x9).unwrap());
+        dbg!(a.stats());
     }
 }
