@@ -17,7 +17,6 @@
 use core::fmt;
 use indexmap::IndexSet;
 use smartstring::alias::String;
-use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -190,13 +189,27 @@ impl IntoTerm for Vec<u8> {
     }
 }
 
-impl<T> IntoTerm for T
-where
-    T: Borrow<Term>,
-{
+impl IntoTerm for Term {
     #[inline]
     fn into_term(self, _arena: &mut Arena) -> Term {
-        *self.borrow()
+        self
+    }
+}
+
+impl IntoTerm for &Term {
+    #[inline]
+    fn into_term(self, _arena: &mut Arena) -> Term {
+        *self
+    }
+}
+
+impl<F> IntoTerm for F
+where
+    F: FnOnce(&mut Arena) -> Term,
+{
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        self(arena)
     }
 }
 
@@ -1386,76 +1399,74 @@ fn numeric_value(t: &View) -> f64 {
 #[macro_export]
 macro_rules! list {
     // with tail, explicit arena
-    ($($arg:expr),* $(,)? ; $tail:expr => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::list!($($arg),* ; $tail)
-    }};
-    // without tail, explicit arena (defaults to NIL)
-    ($($arg:expr),* $(,)? => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::list!($($arg),*)
-    }};
+    ($($arg:expr),* $(,)?; $tail:expr => $arena:expr) => {
+        $crate::list!($($arg),* ; $tail)($arena)
+    };
+    // without tail, explicit arena
+    ($($arg:expr),* $(,)? => $arena:expr) => {
+        $crate::list!($($arg),*)($arena)
+    };
     // with tail, implicit arena
-    ($($arg:expr),* $(,)? ; $tail:expr) => {{
-        let __args = &[$($arg.into_term(__arena)),*];
-        let __tail = $tail.into_term(__arena);
+    ($($arg:expr),* $(,)?; $tail:expr) => { (|__arena: &mut $crate::Arena| {
+        let __args: &[$crate::Term] = &[$($arg.into_term(__arena)),*];
+        let __tail: Term = $tail.into_term(__arena);
         __arena.listc(__args, __tail)
-    }};
+    })};
     // without tail, implicit arena
-    ($($arg:expr),* $(,)?) => {{
-        let __args = &[$($arg.into_term(__arena)),*];
+    ($($arg:expr),* $(,)?) => { (|__arena: &mut $crate::Arena| {
+        let __args: &[$crate::Term] = &[$($arg.into_term(__arena)),*];
         __arena.list(__args)
-    }};
+    })};
 }
 
 #[macro_export]
 macro_rules! tuple {
     // explicit arena
-    ($($arg:expr),* $(,)? => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::tuple!($($arg),*)
-    }};
+    ($($arg:expr),* $(,)? => $arena:expr) => {
+        $crate::tuple!($($arg),*)($arena)
+    };
     // implicit arena
-    ($($arg:expr),* $(,)?) => {{
-        let __args = &[$($arg.into_term(__arena)),*];
+    ($($arg:expr),* $(,)?) => { (|__arena: &mut $crate::Arena| {
+        let __args: &[$crate::Term] = &[$($arg.into_term(__arena)),*];
         __arena.tuple(__args)
-    }};
+    })};
 }
 
 #[macro_export]
 macro_rules! func {
     // explicit arena
-    ($functor:expr ; $($arg:expr),+ $(,)? => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::func!($functor, $($arg),+)
-    }};
+    ($functor:expr; $($arg:expr),+ $(,)? => $arena:expr) => {
+        $crate::func!($functor; $($arg),+)($arena)
+    };
     // implicit arena
-    ($functor:expr ; $($arg:expr),+ $(,)?) => {{
-        let __args = &[$($arg.into_term(__arena)),+];
+    ($functor:expr; $($arg:expr),+ $(,)?) => { (|__arena: &mut $crate::Arena| {
+        let __args: &[$crate::Term] = &[$($arg.into_term(__arena)),+];
         __arena.func($functor, __args)
-    }};
+    })};
 }
 
 #[macro_export]
 macro_rules! atom {
     // explicit arena
-    ($functor:expr => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::atom!($functor)
-    }};
+    ($functor:expr => $arena:expr) => {
+        $crate::atom!($functor)($arena)
+    };
     // implicit arena
-    ($functor:expr) => {{ __arena.func($functor) }};
+    ($functor:expr) => {
+        (|__arena: &mut $crate::Arena| __arena.atom($functor))
+    };
 }
 
 #[macro_export]
 macro_rules! var {
     // explicit arena
-    ($name:expr => $arena:expr) => {{
-        let __arena = $arena;
-        $crate::var!($name)
-    }};
+    ($name:expr => $arena:expr) => {
+        $crate::atom!($name)($arena)
+    };
     // implicit arena
-    ($name:expr) => {{ __arena.func($name) }};
+    ($name:expr) => {
+        (|__arena: &mut $crate::Arena| __arena.var($name))
+    };
 }
 
 #[macro_export]
@@ -1554,17 +1565,22 @@ mod tests {
     #[test]
     fn view_construction() {
         let mut a1 = Arena::new();
-        let mut a2 = Arena::new();
         let x = a1.atom("Hello, hello, quite long long string, world! X");
-        let y = a2.str("Hello, hello, quite long long string, world! Y");
-        dbg!(a1.view(&y).unwrap());
         dbg!(a1.view(&x).unwrap());
         dbg!(a1.stats());
-        dbg!(a2.stats());
-        let ppppp = list![x, y => &mut arena];
-        dbg!(ppppp);
-        let v = a1.view(&ppppp).unwrap();
+        let p = list![x, x => &mut a1];
+        dbg!(p);
+        let v = a1.view(&p).unwrap();
         dbg!(v);
+    }
+
+    #[test]
+    #[should_panic]
+    fn arena_mismatch() {
+        let a1 = Arena::new();
+        let mut a2 = Arena::new();
+        let y = a2.str("Hello, hello, quite long long string, world! Y");
+        dbg!(a1.view(&y).unwrap());
     }
 
     #[test]
@@ -1588,12 +1604,9 @@ mod tests {
         let _x6 = a.func("x", (5..=6).map(|x| x as f64));
         let _x7 = a.func("x", vec![&x1, &x2, &x3]);
         let _x8 = a.func("x", &[x1, x2, x3]);
-        let x9 = func![
+        let x9 = func!(
             String::from("aaa");
-            x1,
-            1u8,
-            1i8,
-            2.0,
+            x1, 1u8, 1i8, 2.0,
             "x",
             "X",
             atom!("ATOM"),
@@ -1605,11 +1618,11 @@ mod tests {
             3,
             4,
             6,
-            unit!,
-            listc![1, 2, 3, unit!],
-            listc![1, 2, 3, nil!],
+            unit!(),
+            list![1, 2, 3; tuple!()],
+            list![1, 2, 3; nil!()],
             => a
-        ];
+        );
         dbg!(a.view(&x9).unwrap());
         dbg!(a.stats());
     }
