@@ -21,54 +21,6 @@ use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-/// Zero-cost wrapper types that disambiguate primitive inputs when constructing [`Term`]s.
-///
-/// A raw `&str` could mean different things: it might be an atom, a variable, or
-/// a string literal. By introducing distinct wrapper types (`Atom`, `Var`, `Str`),
-/// the intent is explicit at the call site. Numeric and binary values are also
-/// wrapped for the same reason.
-///
-/// These newtypes are all `#[repr(transparent)]` wrappers around primitive Rust
-/// types. They carry no runtime cost but improve readability and type safety
-/// when building terms.
-///
-/// # Example
-///
-/// ```rust
-/// # use terms::{Term, Int, Date, Var, func};
-/// # let mut arena = terms::Arena::new();
-///
-/// // Construct a function term equivalent to foo(1, 1000, X)
-/// let t = func!(arena; "foo"; Int(1), Date(1000), Var("X"));
-/// ```
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Int(i64);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Real(f64);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Date(i64);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Atom<'a>(&'a str);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Var<'a>(&'a str);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Str<'a>(&'a str);
-
-#[repr(transparent)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Bin<'a>(&'a [u8]);
-
 // The following type definitions describe the internal representation
 // of a term.  Rather than packing data into a single integer we use
 // a tagged enum to store the various kinds of terms.  Each variant
@@ -139,27 +91,6 @@ impl AsRef<Term> for Term {
     }
 }
 
-impl From<Int> for Term {
-    #[inline]
-    fn from(v: Int) -> Self {
-        Term::int(v.0)
-    }
-}
-
-impl From<Real> for Term {
-    #[inline]
-    fn from(v: Real) -> Self {
-        Term::real(v.0)
-    }
-}
-
-impl From<Date> for Term {
-    #[inline]
-    fn from(v: Date) -> Self {
-        Term::date(v.0)
-    }
-}
-
 macro_rules! impl_from_integers_for_term {
     ($($t:ty),* $(,)?) => {$(
         impl From<$t> for Term {
@@ -184,27 +115,6 @@ pub trait IntoTerm {
     fn into_term(self, arena: &mut Arena) -> Term;
 }
 
-impl IntoTerm for Int {
-    #[inline]
-    fn into_term(self, _arena: &mut Arena) -> Term {
-        Term::int(self.0)
-    }
-}
-
-impl IntoTerm for Real {
-    #[inline]
-    fn into_term(self, _arena: &mut Arena) -> Term {
-        Term::real(self.0)
-    }
-}
-
-impl IntoTerm for Date {
-    #[inline]
-    fn into_term(self, _arena: &mut Arena) -> Term {
-        Term::date(self.0)
-    }
-}
-
 macro_rules! impl_intoterm_for_integers {
     ($($t:ty),* $(,)?) => {$(
         impl IntoTerm for $t {
@@ -225,31 +135,17 @@ macro_rules! impl_intoterm_for_floats {
 }
 impl_intoterm_for_floats!(f32, f64);
 
-impl<'a> IntoTerm for Atom<'a> {
-    #[inline]
-    fn into_term(self, arena: &mut Arena) -> Term {
-        Term::atom(arena, self.0)
-    }
-}
-
-impl<'a> IntoTerm for Var<'a> {
-    #[inline]
-    fn into_term(self, arena: &mut Arena) -> Term {
-        Term::var(arena, self.0)
-    }
-}
-
-impl<'a> IntoTerm for Str<'a> {
-    #[inline]
-    fn into_term(self, arena: &mut Arena) -> Term {
-        Term::str(arena, self.0)
-    }
-}
-
 impl<'a> IntoTerm for &'a str {
     #[inline]
     fn into_term(self, arena: &mut Arena) -> Term {
         Term::str(arena, self)
+    }
+}
+
+impl<'a> IntoTerm for &'a [u8] {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::bin(arena, self)
     }
 }
 
@@ -260,13 +156,6 @@ impl<'a> IntoTerm for Cow<'a, str> {
             Cow::Borrowed(s) => Term::str(arena, s),
             Cow::Owned(s) => Term::str(arena, s),
         }
-    }
-}
-
-impl<'a> IntoTerm for Bin<'a> {
-    #[inline]
-    fn into_term(self, arena: &mut Arena) -> Term {
-        Term::bin(arena, self.0)
     }
 }
 
@@ -291,6 +180,13 @@ impl IntoTerm for std::string::String {
     #[inline]
     fn into_term(self, arena: &mut Arena) -> Term {
         Term::str(arena, &self)
+    }
+}
+
+impl IntoTerm for Vec<u8> {
+    #[inline]
+    fn into_term(self, arena: &mut Arena) -> Term {
+        Term::bin(arena, &self)
     }
 }
 
@@ -478,12 +374,22 @@ impl Term {
         let Some(first) = terms.next() else {
             return Self::NIL;
         };
-        let slice = arena.intern_seq_plus_one(std::iter::once(first).chain(terms), tail);
-        Self(Handle::ListCRef(Slice {
-            arena_id: arena.id,
-            index: slice.index,
-            len: slice.len,
-        }))
+        let tail = tail.into_term(arena);
+        if tail != Term::NIL {
+            let slice = arena.intern_seq_plus_one(std::iter::once(first).chain(terms), tail);
+            Self(Handle::ListCRef(Slice {
+                arena_id: arena.id,
+                index: slice.index,
+                len: slice.len,
+            }))
+        } else {
+            let slice = arena.intern_seq(std::iter::once(first).chain(terms));
+            Self(Handle::ListRef(Slice {
+                arena_id: arena.id,
+                index: slice.index,
+                len: slice.len,
+            }))
+        }
     }
 
     /// Constructs a new tuple. A tuple is represented as a compound term
@@ -1476,62 +1382,101 @@ fn numeric_value(t: &View) -> f64 {
     }
 }
 
-/// Module containing convenience macros for constructing lists and tuples.
-// === List, tuple and compound construction macros ===
-
-/// Construct a list from a sequence of terms.
+/// Convenience macros to construct func, list and tuple.
 #[macro_export]
 macro_rules! list {
-    // empty list
-    () => {
-        $crate::Term::NIL
-    };
-    // proper list
-    ( $arena:expr ; $( $elem:expr ),+ $(,)? ) => {{
-        let terms = &[ $( $elem.into_term($arena) ),+ ];
-        $crate::Term::list($arena, terms)
+    // with tail, explicit arena
+    ($($arg:expr),* $(,)? ; $tail:expr => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::list!($($arg),* ; $tail)
+    }};
+    // without tail, explicit arena (defaults to NIL)
+    ($($arg:expr),* $(,)? => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::list!($($arg),*)
+    }};
+    // with tail, implicit arena
+    ($($arg:expr),* $(,)? ; $tail:expr) => {{
+        let __args = &[$($arg.into_term(__arena)),*];
+        let __tail = $tail.into_term(__arena);
+        __arena.listc(__args, __tail)
+    }};
+    // without tail, implicit arena
+    ($($arg:expr),* $(,)?) => {{
+        let __args = &[$($arg.into_term(__arena)),*];
+        __arena.list(__args)
     }};
 }
 
-/// Construct an improper list from a sequence of terms
-/// and a tail..
-#[macro_export]
-macro_rules! listc {
-    // improper list with explicit tail
-    ( $arena:expr ; $( $elem:expr ),+ ; $tail:expr $(,)? ) => {{
-        let terms = &[ $( $elem.into_term($arena) ),+ ];
-        $crate::Term::listc($arena, terms, $tail)
-    }};
-}
-
-/// Construct a tuple from a sequence of terms.  A 0‑tuple is
-/// represented by the atom `unit`.  Tuples internally are
-/// compounds whose functor is `tuple` and whose arity equals the
-/// number of elements.
 #[macro_export]
 macro_rules! tuple {
+    // explicit arena
+    ($($arg:expr),* $(,)? => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::tuple!($($arg),*)
+    }};
+    // implicit arena
+    ($($arg:expr),* $(,)?) => {{
+        let __args = &[$($arg.into_term(__arena)),*];
+        __arena.tuple(__args)
+    }};
+}
+
+#[macro_export]
+macro_rules! func {
+    // explicit arena
+    ($functor:expr ; $($arg:expr),+ $(,)? => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::func!($functor, $($arg),+)
+    }};
+    // implicit arena
+    ($functor:expr ; $($arg:expr),+ $(,)?) => {{
+        let __args = &[$($arg.into_term(__arena)),+];
+        __arena.func($functor, __args)
+    }};
+}
+
+#[macro_export]
+macro_rules! atom {
+    // explicit arena
+    ($functor:expr => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::atom!($functor)
+    }};
+    // implicit arena
+    ($functor:expr) => {{ __arena.func($functor) }};
+}
+
+#[macro_export]
+macro_rules! var {
+    // explicit arena
+    ($name:expr => $arena:expr) => {{
+        let __arena = $arena;
+        $crate::var!($name)
+    }};
+    // implicit arena
+    ($name:expr) => {{ __arena.func($name) }};
+}
+
+#[macro_export]
+macro_rules! date {
+    ($value:expr) => {
+        $crate::Term::date($value)
+    };
+}
+
+#[macro_export]
+macro_rules! unit {
     () => {
         $crate::Term::UNIT
     };
-    ( $arena:expr ; $( $elem:expr ),+ $(,)? ) => {{
-        let terms = &[ $( $elem.into_term($arena) ),+ ];
-        $crate::Term::tuple($arena, terms)
-    }};
 }
 
-/// Construct a compound term from a functor name and arguments.
-///
-/// This macro is a convenience wrapper around [`Term::func`].  It
-/// takes an arena reference, a functor name and a comma separated
-/// list of argument expressions.  At runtime the arguments are
-/// collected into a slice and passed to [`Term::func`].  If the
-/// arity is zero the macro will return an error via a panic.
 #[macro_export]
-macro_rules! func {
-    ( $arena:expr ; $functor:expr ; $( $arg:expr ),+ $(,)? ) => {{
-        let terms = &[ $( $arg.into_term($arena) ),+ ];
-        $crate::Term::func($arena, $functor, terms)
-    }};
+macro_rules! nil {
+    () => {
+        $crate::Term::NIL
+    };
 }
 
 #[cfg(test)]
@@ -1580,10 +1525,19 @@ mod tests {
         let d = Term::atom(&mut arena, "hello");
         let e = Term::var(&mut arena, "Hello, hello, world!");
         let f = Term::str(&mut arena, "A str\ning.");
-        let g = list![&mut arena; d, e, f];
-        let h = tuple![&mut arena; f];
+        let g = list![d, e, f => &mut arena];
+        let h = tuple!(f => &mut arena);
         let p = Term::func(&mut arena, "point", &[a, b, c, d, e, f, g, h]);
-        let p = func![&mut arena; "foo"; Term::NIL, Term::UNIT, p, p, list![], listc![&mut arena; a, b; c]];
+        let p = func![
+            "foo";
+            Term::NIL,
+            Term::UNIT,
+            p,
+            p,
+            list![],
+            list![a, b; c],
+            => &mut arena
+        ];
         dbg!(&p);
         dbg!(p.view(&arena).unwrap());
         dbg!(arena.stats());
@@ -1607,9 +1561,9 @@ mod tests {
         dbg!(a1.view(&x).unwrap());
         dbg!(a1.stats());
         dbg!(a2.stats());
-        let p = list![&mut a1; x, y];
-        dbg!(p);
-        let v = a1.view(&p).unwrap();
+        let ppppp = list![x, y => &mut arena];
+        dbg!(ppppp);
+        let v = a1.view(&ppppp).unwrap();
         dbg!(v);
     }
 
@@ -1617,7 +1571,7 @@ mod tests {
     fn big_term() {
         let mut a1 = Arena::new();
         let x = a1.atom("Hello, hello, quite long long string, world! X");
-        let p = a1.func("foo", &vec![x; 1_000_000]);
+        let p = a1.func("foo", vec![x; 1_000_000]);
         assert!(p.arity() == 1_000_000);
         dbg!(a1.stats());
     }
@@ -1625,17 +1579,37 @@ mod tests {
     #[test]
     fn interface() {
         let a = &mut Arena::new();
-
         let s = String::from("x");
-        let x1 = Term::func(a, &s, &vec![Term::date(1000)]);
-        let x2 = Term::func(a, s.as_str(), vec![Term::date(1000)]);
-        let x3 = Term::func(a, s, &[Term::date(1000)]);
-        let _x4 = Term::func(a, "x", [Term::date(1000)]);
-        let _x5 = Term::func(a, "x", [x1, x2, x3]);
-        let _x6 = Term::func(a, "x", (5..=6).map(|x| x as f64));
-        let _x7 = Term::func(a, "x", vec![&x1, &x2, &x3]);
-        let _x8 = Term::func(a, "x", &[x1, x2, x3]);
-        let x9 = func!(a; String::from("aaa"); x1, 1u8, 1i8, 2.0, "x", "X", Atom("ATOM"), Var("var"), Str("a string") );
+        let x1 = a.func(&s, &vec![Term::date(1000)]);
+        let x2 = a.func(s.as_str(), vec![Term::date(1000)]);
+        let x3 = a.func(s, &[Term::date(1000)]);
+        let _x4 = a.func("x", [Term::date(1000)]);
+        let _x5 = a.func("x", [x1, x2, x3]);
+        let _x6 = a.func("x", (5..=6).map(|x| x as f64));
+        let _x7 = a.func("x", vec![&x1, &x2, &x3]);
+        let _x8 = a.func("x", &[x1, x2, x3]);
+        let x9 = func![
+            String::from("aaa");
+            x1,
+            1u8,
+            1i8,
+            2.0,
+            "x",
+            "X",
+            atom!("ATOM"),
+            var!("var"),
+            "a string",
+            b"a binary",
+            1,
+            2,
+            3,
+            4,
+            6,
+            unit!,
+            listc![1, 2, 3, unit!],
+            listc![1, 2, 3, nil!],
+            => a
+        ];
         dbg!(a.view(&x9).unwrap());
         dbg!(a.stats());
     }
