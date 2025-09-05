@@ -81,6 +81,12 @@ enum Handle {
 /// directly; instead use the associated constructors or the
 /// convenience macros in the [`term`] module.
 /// Instances of `Term` are cheap to copy (`Copy` and `Clone`).
+
+// TODO: Consider implementing Hash, Eq, and Ord. Verify whether it is valid
+//       to provide PartialEq, Eq, PartialOrd, Ord, and Hash when:
+//       - Two different Term handles may point to the same term value, or
+//       - Two identical Term handles obtained from different arenas may
+//         represent distinct term values.
 #[derive(Copy, Clone, PartialEq)]
 pub struct Term(Handle);
 
@@ -529,7 +535,7 @@ impl Term {
                     index: lr.index,
                     len: lr.len,
                 });
-                Ok(View::List(arena, slice))
+                Ok(View::List(arena, slice, &Term::NIL))
             }
             Handle::ListCRef(lr) => {
                 if arena.id != lr.arena_id {
@@ -540,7 +546,7 @@ impl Term {
                     len: lr.len,
                 });
                 let last = slice.len() - 1;
-                Ok(View::ListC(arena, &slice[..last], &slice[last]))
+                Ok(View::List(arena, &slice[..last], &slice[last]))
             }
             Handle::TupleRef(tr) => {
                 if arena.id != tr.arena_id {
@@ -550,7 +556,7 @@ impl Term {
                     index: tr.index,
                     len: tr.len,
                 });
-                Ok(View::List(arena, slice))
+                Ok(View::Tuple(arena, slice))
             }
         }
     }
@@ -736,13 +742,8 @@ impl fmt::Debug for View<'_> {
                 .field(&fr)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .finish(),
-            View::List(a, ts) => f
+            View::List(a, ts, tail) => f
                 .debug_tuple("List")
-                .field(&a.id)
-                .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
-                .finish(),
-            View::ListC(a, ts, tail) => f
-                .debug_tuple("ListC")
                 .field(&a.id)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .field(&tail.view(a))
@@ -786,14 +787,11 @@ pub enum View<'a> {
     /// borrowed; the arguments themselves are `Term` handles owned
     /// by the arena.
     Func(&'a Arena, &'a str, &'a [Term]),
-    /// A list view containing a slice of the list elements.
-    /// The element slice are borrowed; the elements
-    /// themselves are `Term` handles owned by the arena.
-    List(&'a Arena, &'a [Term]),
-    /// An improper list view containing a slice of the list elements
+    /// A list view containing a slice of the list elements
     /// and a reference to the tail term. The element slice and the tail are
     /// borrowed; the elements themselves are `Term` handles owned by the arena.
-    ListC(&'a Arena, &'a [Term], &'a Term),
+    /// The tail of a proper list will always reference Term::NIL.
+    List(&'a Arena, &'a [Term], &'a Term),
     /// A tuple view containing a slice of the tuple elements.
     /// The element slice are borrowed; the elements
     /// themselves are `Term` handles owned by the arena.
@@ -877,6 +875,12 @@ impl Arena {
     #[inline]
     pub fn view<'a>(&'a self, term: &'a Term) -> Result<View<'a>, TermError> {
         term.view(self)
+    }
+
+    /// Convert a `value` into `Term`. 
+    #[inline]
+    pub fn term<'a, T: IntoTerm>(&'a mut self, value: T) -> Term {
+        value.into_term(self)
     }
 
     /// Construct a new integer term.  The full 64 bit two's complement
@@ -1211,16 +1215,7 @@ impl<'a> PartialEq for View<'a> {
                         == b.view(arena_b).expect("arena mismatch")
                 })
             }
-            (View::List(arena_a, args_a), View::List(arena_b, args_b)) => {
-                if args_a.len() != args_b.len() {
-                    return false;
-                }
-                args_a.iter().zip(args_b.iter()).all(|(a, b)| {
-                    a.view(arena_a).expect("arena mismatch")
-                        == b.view(arena_b).expect("arena mismatch")
-                })
-            }
-            (View::ListC(arena_a, args_a, tail_a), View::ListC(arena_b, args_b, tail_b)) => {
+            (View::List(arena_a, args_a, tail_a), View::List(arena_b, args_b, tail_b)) => {
                 if args_a.len() != args_b.len() {
                     return false;
                 }
@@ -1300,25 +1295,7 @@ impl core::cmp::Ord for View<'_> {
                 }
                 Ordering::Equal
             }
-            (View::List(arena_a, args_a), View::List(arena_b, args_b)) => {
-                let ord = args_a.len().cmp(&args_b.len());
-                if ord != Ordering::Equal {
-                    return ord;
-                }
-                for (arg_a, arg_b) in args_a.iter().zip(args_b.iter()).map(|(a, b)| {
-                    (
-                        a.view(arena_a).expect("arena mismatch"),
-                        b.view(arena_b).expect("arena mismatch"),
-                    )
-                }) {
-                    let ord = arg_a.cmp(&arg_b);
-                    if ord != Ordering::Equal {
-                        return ord;
-                    }
-                }
-                Ordering::Equal
-            }
-            (View::ListC(arena_a, args_a, tail_a), View::ListC(arena_b, args_b, tail_b)) => {
+            (View::List(arena_a, args_a, tail_a), View::List(arena_b, args_b, tail_b)) => {
                 let ord = args_a.len().cmp(&args_b.len());
                 if ord != Ordering::Equal {
                     return ord;
@@ -1369,16 +1346,15 @@ impl core::cmp::Ord for View<'_> {
 fn kind_order(t: &View) -> u8 {
     match t {
         View::Var(_) => 0,
-        View::Real(_) => 1,
-        View::Int(_) => 2,
-        View::Date(_) => 3,
+        View::Int(_) => 1,
+        View::Date(_) => 2,
+        View::Real(_) => 3,
         View::Atom(_) => 4,
         View::Str(_) => 5,
-        View::Bin(_) => 6,
-        View::Func(_, _, _) => 7,
-        View::Tuple(_, _) => 8,
-        View::List(_, _) => 9,
-        View::ListC(_, _, _) => 10,
+        View::Func(_, _, _) => 6,
+        View::Tuple(_, _) => 7,
+        View::List(_, _, _) => 8,
+        View::Bin(_) => 9,
     }
 }
 
@@ -1461,7 +1437,7 @@ macro_rules! atom {
 macro_rules! var {
     // explicit arena
     ($name:expr => $arena:expr) => {
-        $crate::atom!($name)($arena)
+        $crate::var!($name)($arena)
     };
     // implicit arena
     ($name:expr) => {
@@ -1625,5 +1601,31 @@ mod tests {
         );
         dbg!(a.view(&x9).unwrap());
         dbg!(a.stats());
+    }
+
+    #[test]
+    fn into_test() {
+        let mut arena = Arena::new();
+        // You can mix numbers and strings; IntoTerm will pick the right constructor.
+        let t1 = arena.term(1);
+        let t2 = arena.term(2.0);
+        let t3 = arena.term("x");
+        let t4 = arena.term(b"bin" as &[u8]);
+        let point1 = arena.func("point", [t1, t2, t3, t4]);
+        // Equivalent to:
+        let t1 = Term::int(1);
+        let t2 = Term::real(2.0);
+        let t3 = Term::str(&mut arena, "x");
+        let t4 = Term::bin(&mut arena, b"bin");
+        let point2 = arena.func("point", [t1, t2, t3, t4]);
+        assert_eq!(arena.view(&point1).unwrap(), arena.view(&point2).unwrap());
+        dbg!(arena.view(&point1).unwrap());
+
+        // You can also provide closures returning Term.
+        let lazy = Term::func(&mut arena, "lazy", [|arena: &mut Arena| arena.atom("ok")]);
+        dbg!(arena.view(&lazy).unwrap());
+
+        let list = arena.list([1, 2, 3]);
+        dbg!(arena.view(&list).unwrap());
     }
 }
