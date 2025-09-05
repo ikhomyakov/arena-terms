@@ -845,6 +845,15 @@ pub struct ArenaStats {
     pub terms: usize,
 }
 
+#[derive(Debug)]
+pub struct Marker {
+    atoms_len: usize,
+    vars_len: usize,
+    string_data_len: usize,
+    bin_data_len: usize,
+    terms_len: usize,
+}
+
 impl Arena {
     /// Create a new, empty arena.
     pub fn new() -> Self {
@@ -868,6 +877,51 @@ impl Arena {
         }
     }
 
+    /// Clears all data, including atoms and vars.
+    /// Does not shrink the allocated capacity.
+    pub fn clear_all(&mut self) {
+        self.atoms.clear();
+        self.atom_alloc_count = 0;
+        self.vars.clear();
+        self.var_alloc_count = 0;
+        self.clear();
+    }
+
+    /// Clears data excluding atoms and vars.
+    /// Does not shrink the allocated capacity.
+    pub fn clear(&mut self) {
+        self.string_data.clear();
+        self.bin_data.clear();
+        self.terms.clear();
+    }
+
+    /// Returns a marker representing the current lengths of all data structures.
+    pub fn mark(&mut self) -> Marker {
+        Marker {
+            atoms_len: self.atoms.len(),
+            vars_len: self.vars.len(),
+            string_data_len: self.string_data.len(),
+            bin_data_len: self.bin_data.len(),
+            terms_len: self.terms.len(),
+        }
+    }
+
+    /// Truncates all data back to the given marker, including atoms and vars.
+    /// Does not shrink the allocated capacity.
+    pub fn truncate_all(&mut self, marker: Marker) {
+        self.atoms.truncate(marker.atoms_len);
+        self.vars.truncate(marker.vars_len);
+        self.truncate(marker);
+    }
+
+    /// Truncates data back to the given marker, excluding atoms and vars.
+    /// Does not shrink the allocated capacity.
+    pub fn truncate(&mut self, marker: Marker) {
+        self.string_data.truncate(marker.string_data_len);
+        self.bin_data.truncate(marker.bin_data_len);
+        self.terms.truncate(marker.terms_len);
+    }
+
     /// Produce a [`View`] of the given `term` that borrows from
     /// this [`Arena`].  This method decodes any inlined bytes and
     /// dereferences indexes into the arena to yield structured
@@ -877,7 +931,7 @@ impl Arena {
         term.view(self)
     }
 
-    /// Convert a `value` into `Term`. 
+    /// Convert a `value` into `Term`.
     #[inline]
     pub fn term<'a, T: IntoTerm>(&'a mut self, value: T) -> Term {
         value.into_term(self)
@@ -1627,5 +1681,29 @@ mod tests {
 
         let list = arena.list([1, 2, 3]);
         dbg!(arena.view(&list).unwrap());
+    }
+
+    #[test]
+    fn arena_truncate_test() {
+        let a = &mut Arena::new();
+
+        let t1 = a.str("a".repeat(1000));
+        let t5 = atom!("x".repeat(100) => a);
+        let t6 = var!("X".repeat(200) => a);
+        let t7 = a.bin(b"x".repeat(5000));
+        let m1 = a.mark();
+        dbg!(a.stats());
+        dbg!(&m1);
+        let t2 = a.str("b".repeat(2000));
+        let t3 = a.bin(b"b".repeat(3000));
+        let t4 = list![t1, t2, t3];
+        let t5 = atom!("z".repeat(4000) => a);
+        let t8 = var!("Z".repeat(2000) => a);
+        let t7 = a.bin(b"z".repeat(10_000));
+        let m2 = a.mark();
+        dbg!(a.stats());
+        dbg!(&m2);
+        a.truncate(m2);
+        dbg!(a.stats());
     }
 }
