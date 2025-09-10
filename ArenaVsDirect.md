@@ -55,6 +55,11 @@ In an arena-based design, all term data is **immutable** and stored in shared bu
 - **Arena:** Drop/reset wipes large amounts of data quickly.  
 - **Direct Enum:** Rust’s granular drop provides flexibility at the cost of efficiency for bulk deletions.
 
+## Serialization/Deserialization
+
+* **Arena:** Enables fast and efficient serialization/deserialization, especially for binary formats.
+* **Direct Enum:** Results in much slower serialization/deserialization.
+
 ## Ergonomics and API Design  
 
 ### Pattern Matching
