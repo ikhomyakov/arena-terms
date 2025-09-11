@@ -27,13 +27,13 @@ use std::cmp::Ordering;
 // variables.  Long names or sequences store an index and length into
 // the appropriate arena.
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct TinyArray {
     bytes: [u8; 14],
     len: u8,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct Slice {
     epoch_id: EpochID,
     index: u32,
@@ -421,7 +421,11 @@ impl Term {
                 Ok(View::Var(s))
             }
             Handle::VarRef(vr) => Ok(View::Var(unsafe {
-                core::str::from_utf8_unchecked(arena.byte_slice(vr)?)
+                core::str::from_utf8_unchecked(
+                    arena
+                        .byte_slice(vr)
+                        .map_err(|_| TermError::InvalidTerm(*self))?,
+                )
             })),
             Handle::Atom(a) => {
                 let s_bytes = &a.bytes[..a.len as usize];
@@ -429,7 +433,11 @@ impl Term {
                 Ok(View::Atom(s))
             }
             Handle::AtomRef(ar) => Ok(View::Atom(unsafe {
-                core::str::from_utf8_unchecked(arena.byte_slice(ar)?)
+                core::str::from_utf8_unchecked(
+                    arena
+                        .byte_slice(ar)
+                        .map_err(|_| TermError::InvalidTerm(*self))?,
+                )
             })),
             Handle::Str(ss) => {
                 let s_bytes = &ss.bytes[..ss.len as usize];
@@ -437,15 +445,25 @@ impl Term {
                 Ok(View::Str(s))
             }
             Handle::StrRef(sr) => Ok(View::Str(unsafe {
-                core::str::from_utf8_unchecked(arena.byte_slice(sr)?)
+                core::str::from_utf8_unchecked(
+                    arena
+                        .byte_slice(sr)
+                        .map_err(|_| TermError::InvalidTerm(*self))?,
+                )
             })),
             Handle::Bin(bs) => {
                 let b = &bs.bytes[..bs.len as usize];
                 Ok(View::Bin(b))
             }
-            Handle::BinRef(br) => Ok(View::Bin(arena.byte_slice(br)?)),
+            Handle::BinRef(br) => Ok(View::Bin(
+                arena
+                    .byte_slice(br)
+                    .map_err(|_| TermError::InvalidTerm(*self))?,
+            )),
             Handle::FuncRef(fr) => {
-                let slice = arena.term_slice(fr)?;
+                let slice = arena
+                    .term_slice(fr)
+                    .map_err(|_| TermError::InvalidTerm(*self))?;
                 // Functor is the first element of the slice
                 let functor = match &slice[0].0 {
                     Handle::Atom(a) => {
@@ -453,7 +471,11 @@ impl Term {
                         unsafe { core::str::from_utf8_unchecked(s_bytes) }
                     }
                     Handle::AtomRef(ar2) => unsafe {
-                        core::str::from_utf8_unchecked(arena.byte_slice(ar2)?)
+                        core::str::from_utf8_unchecked(
+                            arena
+                                .byte_slice(ar2)
+                                .map_err(|_| TermError::InvalidTerm(*self))?,
+                        )
                     },
                     _ => panic!("invalid functor"),
                 };
@@ -461,16 +483,22 @@ impl Term {
                 Ok(View::Func(arena, functor, args))
             }
             Handle::ListRef(lr) => {
-                let slice = arena.term_slice(lr)?;
+                let slice = arena
+                    .term_slice(lr)
+                    .map_err(|_| TermError::InvalidTerm(*self))?;
                 Ok(View::List(arena, slice, &Term::NIL))
             }
             Handle::ListCRef(lr) => {
-                let slice = arena.term_slice(lr)?;
+                let slice = arena
+                    .term_slice(lr)
+                    .map_err(|_| TermError::InvalidTerm(*self))?;
                 let last = slice.len() - 1;
                 Ok(View::List(arena, &slice[..last], &slice[last]))
             }
             Handle::TupleRef(tr) => {
-                let slice = arena.term_slice(tr)?;
+                let slice = arena
+                    .term_slice(tr)
+                    .map_err(|_| TermError::InvalidTerm(*self))?;
                 Ok(View::Tuple(arena, slice))
             }
         }
@@ -727,16 +755,16 @@ pub enum View<'a> {
 /// - Freezes the current epoch (recording its byte and term offsets).  
 /// - Starts a new *active* epoch for subsequent allocations.  
 ///
-/// At any point, there are `K` active epochs, where:
+/// At any point, there are `K` alive epochs, where:
 /// - `K - 1` are frozen (no new data is added),  
 /// - The last one is active (all new allocations go there),  
-/// - and `K <= MAX_ALIVE_EPOCHS` (typically very small number, currently 8).  
+/// - and `K <= MAX_LIVE_EPOCHS` (typically very small number, currently 8).
 ///
 /// Terms remain valid only while the epoch they were created in is alive.  
 ///
 /// ### Truncation
 /// The arena can be truncated back to a given epoch `m`, where
-/// `0 <= m < MAX_ALIVE_EPOCHS`:  
+/// `0 <= m < MAX_LIVE_EPOCHS`:
 /// - Epoch `m` and all epochs more recent than `m` are erased in O(1).  
 /// - Terms from those epochs become invalid.  
 /// - `truncate(0)` erases all data (synonym: `clear()`).  
@@ -762,7 +790,7 @@ pub struct Arena {
     /// Randomly generated Arena ID
     arena_id: ArenaID,
 
-    /// Index into the buffers of active epochs.
+    /// Index into the buffers of alive epochs.
     /// Always points to the "current" epoch (latest allocations).
     current_epoch: usize,
 
@@ -771,7 +799,7 @@ pub struct Arena {
     /// carries the epoch ID that was current at allocation time.
     /// When a handle is later resolved, the epoch ID is checked to
     /// ensure it still belongs to the same arena instance.
-    epoch_ids: [EpochID; MAX_ALIVE_EPOCHS],
+    epoch_ids: [EpochID; MAX_LIVE_EPOCHS],
 
     /// Storage for interned atoms, variables, strings, and binary blobs.
     /// Data are appended sequentially in the last active epoch.
@@ -779,7 +807,7 @@ pub struct Arena {
 
     /// For each epoch, the starting offset into `bytes`.
     /// Used to "rewind" or reclaim all data belonging to an expired epoch.
-    byte_start_by_epoch: [usize; MAX_ALIVE_EPOCHS],
+    byte_start_by_epoch: [usize; MAX_LIVE_EPOCHS],
 
     /// Storage for compound terms (structured values).
     /// Terms are appended sequentially in the last active epoch.
@@ -790,13 +818,10 @@ pub struct Arena {
 
     /// For each epoch, the starting index into `terms`.
     /// Used to drop/pick up all terms from an expired epoch in bulk.
-    term_start_by_epoch: [usize; MAX_ALIVE_EPOCHS],
+    term_start_by_epoch: [usize; MAX_LIVE_EPOCHS],
 }
 
-pub const MAX_ALIVE_EPOCHS: usize = 8;
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Epoch(usize); // Index into the buffers of active epochs.
+pub const MAX_LIVE_EPOCHS: usize = 8;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EpochID(u32); // Random Epoch ID
@@ -806,7 +831,7 @@ struct ArenaID(u32); // Random Arena ID
 
 #[derive(Debug, Clone, Copy)]
 pub struct ArenaStats {
-    pub current_epoch: Epoch,
+    pub current_epoch: EpochID,
     pub bytes_len: usize,
     pub terms_len: usize,
 }
@@ -814,7 +839,7 @@ pub struct ArenaStats {
 impl Arena {
     /// Create a new, empty arena with given capacities.
     pub fn with_capacity(bytes_capacity: usize, terms_capacity: usize) -> Self {
-        let mut epoch_ids = [EpochID(0); MAX_ALIVE_EPOCHS];
+        let mut epoch_ids = [EpochID(0); MAX_LIVE_EPOCHS];
         epoch_ids[0] = EpochID(rand::random());
 
         Self {
@@ -822,9 +847,9 @@ impl Arena {
             current_epoch: 0,
             epoch_ids,
             bytes: Vec::with_capacity(bytes_capacity),
-            byte_start_by_epoch: [0; MAX_ALIVE_EPOCHS],
+            byte_start_by_epoch: [0; MAX_LIVE_EPOCHS],
             terms: Vec::with_capacity(terms_capacity),
-            term_start_by_epoch: [0; MAX_ALIVE_EPOCHS],
+            term_start_by_epoch: [0; MAX_LIVE_EPOCHS],
         }
     }
 
@@ -836,51 +861,101 @@ impl Arena {
     /// Returns stats.
     pub fn stats(&self) -> ArenaStats {
         ArenaStats {
-            current_epoch: Epoch(self.current_epoch),
+            current_epoch: self.epoch_ids[self.current_epoch],
             bytes_len: self.bytes.len(),
             terms_len: self.terms.len(),
         }
     }
 
     /// Returns current epoch.
-    pub fn current_epoch(&self) -> Epoch {
-        Epoch(self.current_epoch)
+    pub fn current_epoch(&self) -> EpochID {
+        self.epoch_ids[self.current_epoch]
     }
 
     /// Freezes current epoch and begins a new one.
-    pub fn begin_epoch(&mut self) -> Result<Epoch, TermError> {
+    pub fn begin_epoch(&mut self) -> Result<EpochID, TermError> {
         let new_epoch = self.current_epoch + 1;
-        if new_epoch >= MAX_ALIVE_EPOCHS {
-            return Err(TermError::EpochOverflow);
+        if new_epoch >= MAX_LIVE_EPOCHS {
+            return Err(TermError::LiveEpochsExceeded);
         }
         self.epoch_ids[new_epoch] = EpochID(rand::random());
         self.byte_start_by_epoch[new_epoch] = self.bytes.len();
         self.term_start_by_epoch[new_epoch] = self.terms.len();
         self.current_epoch = new_epoch;
-        Ok(Epoch(new_epoch))
+        Ok(self.epoch_ids[new_epoch])
     }
 
     /// Erases arena in O(1).
     /// Does not shrink the allocated capacity.
     pub fn clear(&mut self) -> Result<(), TermError> {
-        self.truncate(Epoch(0))
+        self.truncate(self.epoch_ids[0])
     }
 
     /// Epoch `m` and all epochs more recent than `m` are erased in O(1)
     /// Does not shrink the allocated capacity.
     pub fn truncate_current(&mut self) -> Result<(), TermError> {
-        self.truncate(Epoch(self.current_epoch))
+        self.truncate(self.epoch_ids[self.current_epoch])
     }
 
     /// Epoch `m` and all epochs more recent than `m` are erased in O(1)
     /// Does not shrink the allocated capacity.
-    pub fn truncate(&mut self, Epoch(m): Epoch) -> Result<(), TermError> {
-        if m > self.current_epoch {
-            return Err(TermError::InvalidEpoch(Epoch(self.current_epoch)));
+    pub fn truncate(&mut self, epoch_id: EpochID) -> Result<(), TermError> {
+        let epoch = self
+            .epoch_index(epoch_id)
+            .map_err(|_| TermError::InvalidEpoch(epoch_id))?;
+        self.bytes.truncate(self.byte_start_by_epoch[epoch]);
+        self.terms.truncate(self.term_start_by_epoch[epoch]);
+        self.current_epoch = epoch;
+        Ok(())
+    }
+
+    /// Searches epoch ID in alive epochs and returns its index.
+    #[inline]
+    fn epoch_index(&self, epoch_id: EpochID) -> Result<usize, InternalTermError> {
+        let Some(epoch) = self.epoch_ids[..=self.current_epoch]
+            .iter()
+            .position(|&id| id == epoch_id)
+        else {
+            return Err(InternalTermError::InvalidEpoch(epoch_id));
+        };
+        Ok(epoch)
+    }
+
+    /// Returns an error if the term's slice's epoch is not among the alive epochs,
+    /// or if the slice's index/length is inconsistent with the epoch's range.
+    #[inline]
+    fn verify_byte_slice(&self, slice: &Slice) -> Result<(), InternalTermError> {
+        let epoch = self.epoch_index(slice.epoch_id)?;
+        let epoch_start = self.byte_start_by_epoch[epoch];
+        let epoch_end = if epoch == self.current_epoch {
+            self.bytes.len()
+        } else {
+            self.byte_start_by_epoch[epoch + 1]
+        };
+        if (slice.index as usize) < epoch_start
+            || (slice.index as usize) + (slice.len as usize) > epoch_end
+        {
+            return Err(InternalTermError::InvalidSlice(*slice));
         }
-        self.bytes.truncate(self.byte_start_by_epoch[m]);
-        self.terms.truncate(self.term_start_by_epoch[m]);
-        self.current_epoch = m;
+        Ok(())
+    }
+
+    /// Returns an error if the byte's slice's epoch is not among the alive epochs,
+    /// or if the slice's index/length is inconsistent with the epoch's range.
+    #[inline]
+    fn verify_term_slice(&self, slice: &Slice) -> Result<(), InternalTermError> {
+        let epoch = self.epoch_index(slice.epoch_id)?;
+        let epoch_start = self.term_start_by_epoch[epoch];
+        let epoch_end = if epoch == self.current_epoch {
+            self.terms.len()
+        } else {
+            self.term_start_by_epoch[epoch + 1]
+        };
+        if (slice.index as usize) < epoch_start
+            || (slice.index as usize) + (slice.len as usize) > epoch_end
+        {
+            return Err(InternalTermError::InvalidSlice(*slice));
+        }
         Ok(())
     }
 
@@ -1080,12 +1155,14 @@ impl Arena {
     /// Borrow a slice of bytes stored in the arena.
     /// should not be called directly by users; instead use
     /// [`Term::view`].
-    fn byte_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [u8], TermError> {
+    fn byte_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [u8], InternalTermError> {
+        self.verify_byte_slice(slice)?;
         Ok(&self.bytes[(slice.index as usize)..((slice.index + slice.len) as usize)])
     }
 
     /// Borrow a slice of terms comprising a compound term.
-    fn term_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [Term], TermError> {
+    fn term_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [Term], InternalTermError> {
+        self.verify_term_slice(slice)?;
         Ok(&self.terms[(slice.index as usize)..((slice.index + slice.len) as usize)])
     }
 }
@@ -1093,23 +1170,42 @@ impl Arena {
 /// Errors that may occur when constructing terms or interacting with arena.
 #[derive(Debug, Clone)]
 pub enum TermError {
-    /// The term comes from a different arena.
-    InvalidTerm(EpochID, Term),
-    InvalidEpoch(Epoch),
-    EpochOverflow,
+    InvalidTerm(Term),
+    LiveEpochsExceeded,
+    InvalidEpoch(EpochID),
 }
 
 impl fmt::Display for TermError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TermError::InvalidTerm(epoch_id, term) => {
-                write!(f, "Invalid term: epoch_id {:?}, term {:?}", epoch_id, term)
+            TermError::InvalidTerm(term) => {
+                write!(f, "Invalid term {:?}", term)
             }
-            TermError::InvalidEpoch(epoch) => {
-                write!(f, "Invalid epoch {:?}", epoch)
-            }
-            TermError::EpochOverflow => {
+            TermError::LiveEpochsExceeded => {
                 write!(f, "Epoch overflow")
+            }
+            TermError::InvalidEpoch(epoch_id) => {
+                write!(f, "Invalid epoch {:?}", epoch_id)
+            }
+        }
+    }
+}
+
+/// Internal errors that may occur when constructing terms or interacting with arena.
+#[derive(Debug, Clone)]
+enum InternalTermError {
+    InvalidEpoch(EpochID),
+    InvalidSlice(Slice),
+}
+
+impl fmt::Display for InternalTermError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InternalTermError::InvalidEpoch(epoch_id) => {
+                write!(f, "Invalid epoch {:?}", epoch_id)
+            }
+            InternalTermError::InvalidSlice(slice) => {
+                write!(f, "Invalid slice {:?}", slice)
             }
         }
     }
@@ -1497,6 +1593,30 @@ mod tests {
         let mut a2 = Arena::new();
         let y = a2.str("Hello, hello, quite long long string, world! Y");
         dbg!(a1.view(&y).unwrap());
+    }
+
+    #[test]
+    #[should_panic]
+    fn stale_term_str() {
+        let mut a = Arena::new();
+        let x = a.str("Hello, hello, quite long long string, world! Y");
+        dbg!(&a);
+        a.truncate(a.current_epoch()).unwrap();
+        dbg!(a.view(&x).unwrap());
+    }
+
+    #[test]
+    #[should_panic]
+    fn stale_term_list() {
+        let mut a = Arena::new();
+        let _x = list![1, 2, 3 => &mut a];
+        let epoch = a.begin_epoch().unwrap();
+        dbg!(&epoch);
+        let y = list![4, 5, 6 => &mut a];
+        dbg!(&a);
+        a.truncate(epoch).unwrap();
+        dbg!(&a);
+        dbg!(a.view(&y).unwrap());
     }
 
     #[test]
