@@ -15,7 +15,6 @@
 //! macros exported from this crate.
 
 use core::fmt;
-use indexmap::IndexSet;
 use smartstring::alias::String;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -35,14 +34,8 @@ struct TinyArray {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-struct Index {
-    arena_id: ArenaID,
-    index: u32,
-}
-
-#[derive(Copy, Clone, PartialEq)]
 struct Slice {
-    arena_id: ArenaID,
+    epoch_id: EpochID,
     index: u32,
     len: u32,
 }
@@ -60,9 +53,9 @@ enum Handle {
     Real(f64),
     Date(i64),
     Var(TinyArray),
-    VarRef(Index),
+    VarRef(Slice),
     Atom(TinyArray),
-    AtomRef(Index),
+    AtomRef(Slice),
     Str(TinyArray),
     StrRef(Slice),
     Bin(TinyArray),
@@ -260,11 +253,7 @@ impl Term {
                 len: bytes.len() as u8,
             }))
         } else {
-            let id = arena.intern_atom(name);
-            Self(Handle::AtomRef(Index {
-                arena_id: arena.id,
-                index: id.0,
-            }))
+            Self(Handle::AtomRef(arena.intern_str(name)))
         }
     }
 
@@ -284,11 +273,7 @@ impl Term {
                 len: bytes.len() as u8,
             }))
         } else {
-            let id = arena.intern_var(name);
-            Self(Handle::VarRef(Index {
-                arena_id: arena.id,
-                index: id.0,
-            }))
+            Self(Handle::VarRef(arena.intern_str(name)))
         }
     }
 
@@ -308,12 +293,7 @@ impl Term {
                 len: bytes.len() as u8,
             }))
         } else {
-            let slice = arena.intern_str(s);
-            Self(Handle::StrRef(Slice {
-                arena_id: arena.id,
-                index: slice.index,
-                len: slice.len,
-            }))
+            Self(Handle::StrRef(arena.intern_str(s)))
         }
     }
 
@@ -331,12 +311,7 @@ impl Term {
                 len: bytes.len() as u8,
             }))
         } else {
-            let slice = arena.intern_bin(bytes);
-            Self(Handle::BinRef(Slice {
-                arena_id: arena.id,
-                index: slice.index,
-                len: slice.len,
-            }))
+            Self(Handle::BinRef(arena.intern_bytes(bytes)))
         }
     }
 
@@ -356,12 +331,10 @@ impl Term {
         let Some(first) = args.next() else {
             return functor_atom;
         };
-        let slice = arena.intern_func(functor_atom, std::iter::once(first).chain(args));
-        Self(Handle::FuncRef(Slice {
-            arena_id: arena.id,
-            index: slice.index,
-            len: slice.len,
-        }))
+        Self(Handle::FuncRef(arena.intern_func(
+            functor_atom,
+            std::iter::once(first).chain(args),
+        )))
     }
 
     /// Constructs a new list. A list is represented as a compound term
@@ -372,12 +345,9 @@ impl Term {
         let Some(first) = terms.next() else {
             return Self::NIL;
         };
-        let slice = arena.intern_seq(std::iter::once(first).chain(terms));
-        Self(Handle::ListRef(Slice {
-            arena_id: arena.id,
-            index: slice.index,
-            len: slice.len,
-        }))
+        Self(Handle::ListRef(
+            arena.intern_seq(std::iter::once(first).chain(terms)),
+        ))
     }
 
     /// Constructs a new improper list. An improper list is represented as
@@ -395,19 +365,14 @@ impl Term {
         };
         let tail = tail.into_term(arena);
         if tail != Term::NIL {
-            let slice = arena.intern_seq_plus_one(std::iter::once(first).chain(terms), tail);
-            Self(Handle::ListCRef(Slice {
-                arena_id: arena.id,
-                index: slice.index,
-                len: slice.len,
-            }))
+            Self(Handle::ListCRef(arena.intern_seq_plus_one(
+                std::iter::once(first).chain(terms),
+                tail,
+            )))
         } else {
-            let slice = arena.intern_seq(std::iter::once(first).chain(terms));
-            Self(Handle::ListRef(Slice {
-                arena_id: arena.id,
-                index: slice.index,
-                len: slice.len,
-            }))
+            Self(Handle::ListRef(
+                arena.intern_seq(std::iter::once(first).chain(terms)),
+            ))
         }
     }
 
@@ -419,12 +384,9 @@ impl Term {
         let Some(first) = terms.next() else {
             return Self::UNIT;
         };
-        let slice = arena.intern_seq(std::iter::once(first).chain(terms));
-        Self(Handle::TupleRef(Slice {
-            arena_id: arena.id,
-            index: slice.index,
-            len: slice.len,
-        }))
+        Self(Handle::TupleRef(
+            arena.intern_seq(std::iter::once(first).chain(terms)),
+        ))
     }
 
     /// Constant representing the zero‑arity tuple (unit).  Internally
@@ -455,107 +417,60 @@ impl Term {
             Handle::Date(d) => Ok(View::Date(*d)),
             Handle::Var(vs) => {
                 let s_bytes = &vs.bytes[..vs.len as usize];
-                let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in variable");
+                let s = unsafe { core::str::from_utf8_unchecked(s_bytes) };
                 Ok(View::Var(s))
             }
-            Handle::VarRef(vr) => {
-                if arena.id != vr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let name = arena.var_name(VarId(vr.index));
-                Ok(View::Var(name))
-            }
+            Handle::VarRef(vr) => Ok(View::Var(unsafe {
+                core::str::from_utf8_unchecked(arena.byte_slice(vr)?)
+            })),
             Handle::Atom(a) => {
                 let s_bytes = &a.bytes[..a.len as usize];
-                let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in atom");
+                let s = unsafe { core::str::from_utf8_unchecked(s_bytes) };
                 Ok(View::Atom(s))
             }
-            Handle::AtomRef(ar) => {
-                if arena.id != ar.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let name = arena.atom_name(AtomId(ar.index));
-                Ok(View::Atom(name))
-            }
+            Handle::AtomRef(ar) => Ok(View::Atom(unsafe {
+                core::str::from_utf8_unchecked(arena.byte_slice(ar)?)
+            })),
             Handle::Str(ss) => {
                 let s_bytes = &ss.bytes[..ss.len as usize];
-                let s = core::str::from_utf8(s_bytes).expect("invalid UTF8 in string");
+                let s = unsafe { core::str::from_utf8_unchecked(s_bytes) };
                 Ok(View::Str(s))
             }
-            Handle::StrRef(sr) => {
-                if arena.id != sr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.str_slice(StrSlice {
-                    index: sr.index,
-                    len: sr.len,
-                });
-                let s = core::str::from_utf8(slice).expect("invalid UTF8 in string");
-                Ok(View::Str(s))
-            }
+            Handle::StrRef(sr) => Ok(View::Str(unsafe {
+                core::str::from_utf8_unchecked(arena.byte_slice(sr)?)
+            })),
             Handle::Bin(bs) => {
                 let b = &bs.bytes[..bs.len as usize];
                 Ok(View::Bin(b))
             }
-            Handle::BinRef(br) => {
-                if arena.id != br.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.bin_slice(BinSlice {
-                    index: br.index,
-                    len: br.len,
-                });
-                Ok(View::Bin(slice))
-            }
+            Handle::BinRef(br) => Ok(View::Bin(arena.byte_slice(br)?)),
             Handle::FuncRef(fr) => {
-                if arena.id != fr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.term_slice(TermSlice {
-                    index: fr.index,
-                    len: fr.len,
-                });
+                let slice = arena.term_slice(fr)?;
                 // Functor is the first element of the slice
                 let functor = match &slice[0].0 {
                     Handle::Atom(a) => {
                         let s_bytes = &a.bytes[..a.len as usize];
-                        core::str::from_utf8(s_bytes).expect("invalid UTF8 in functor")
+                        unsafe { core::str::from_utf8_unchecked(s_bytes) }
                     }
-                    Handle::AtomRef(ar2) => arena.atom_name(AtomId(ar2.index)),
+                    Handle::AtomRef(ar2) => unsafe {
+                        core::str::from_utf8_unchecked(arena.byte_slice(ar2)?)
+                    },
                     _ => panic!("invalid functor"),
                 };
                 let args = &slice[1..];
                 Ok(View::Func(arena, functor, args))
             }
             Handle::ListRef(lr) => {
-                if arena.id != lr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.term_slice(TermSlice {
-                    index: lr.index,
-                    len: lr.len,
-                });
+                let slice = arena.term_slice(lr)?;
                 Ok(View::List(arena, slice, &Term::NIL))
             }
             Handle::ListCRef(lr) => {
-                if arena.id != lr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.term_slice(TermSlice {
-                    index: lr.index,
-                    len: lr.len,
-                });
+                let slice = arena.term_slice(lr)?;
                 let last = slice.len() - 1;
                 Ok(View::List(arena, &slice[..last], &slice[last]))
             }
             Handle::TupleRef(tr) => {
-                if arena.id != tr.arena_id {
-                    return Err(TermError::ArenaMismatch(arena.id, *self));
-                }
-                let slice = arena.term_slice(TermSlice {
-                    index: tr.index,
-                    len: tr.len,
-                });
+                let slice = arena.term_slice(tr)?;
                 Ok(View::Tuple(arena, slice))
             }
         }
@@ -664,63 +579,65 @@ impl fmt::Debug for Term {
             }
             Handle::VarRef(v) => f
                 .debug_struct("VarRef")
-                .field("arena_id", &v.arena_id)
+                .field("epoch_id", &v.epoch_id)
                 .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
             Handle::Atom(a) => {
                 let name =
                     core::str::from_utf8(&a.bytes[..a.len as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("Atom").field("name", &name).finish()
             }
-            Handle::AtomRef(a) => f
+            Handle::AtomRef(v) => f
                 .debug_struct("AtomRef")
-                .field("arena_id", &a.arena_id)
-                .field("index", &a.index)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
             Handle::Str(s) => {
                 let value =
                     core::str::from_utf8(&s.bytes[..s.len as usize]).unwrap_or("<invalid utf8>");
                 f.debug_struct("Str").field("value", &value).finish()
             }
-            Handle::StrRef(r) => f
+            Handle::StrRef(v) => f
                 .debug_struct("StrRef")
-                .field("arena_id", &r.arena_id)
-                .field("index", &r.index)
-                .field("len", &r.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
             Handle::Bin(b) => {
                 let slice = &b.bytes[..b.len as usize];
                 f.debug_struct("Bin").field("bytes", &slice).finish()
             }
-            Handle::BinRef(br) => f
+            Handle::BinRef(v) => f
                 .debug_struct("BinRef")
-                .field("arena_id", &br.arena_id)
-                .field("index", &br.index)
-                .field("len", &br.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
-            Handle::FuncRef(fr) => f
+            Handle::FuncRef(v) => f
                 .debug_struct("Func")
-                .field("arena_id", &fr.arena_id)
-                .field("index", &fr.index)
-                .field("len", &fr.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
-            Handle::ListRef(lr) => f
+            Handle::ListRef(v) => f
                 .debug_struct("List")
-                .field("arena_id", &lr.arena_id)
-                .field("index", &lr.index)
-                .field("len", &lr.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
-            Handle::ListCRef(lr) => f
+            Handle::ListCRef(v) => f
                 .debug_struct("ListC")
-                .field("arena_id", &lr.arena_id)
-                .field("index", &lr.index)
-                .field("len", &lr.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
-            Handle::TupleRef(tr) => f
+            Handle::TupleRef(v) => f
                 .debug_struct("Tuple")
-                .field("arena_id", &tr.arena_id)
-                .field("index", &tr.index)
-                .field("len", &tr.len)
+                .field("epoch_id", &v.epoch_id)
+                .field("index", &v.index)
+                .field("len", &v.len)
                 .finish(),
         }
     }
@@ -738,19 +655,19 @@ impl fmt::Debug for View<'_> {
             View::Bin(b) => f.debug_tuple("Bin").field(&b).finish(),
             View::Func(a, fr, ts) => f
                 .debug_tuple("Func")
-                .field(&a.id)
+                .field(&a.arena_id)
                 .field(&fr)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .finish(),
             View::List(a, ts, tail) => f
                 .debug_tuple("List")
-                .field(&a.id)
+                .field(&a.arena_id)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .field(&tail.view(a))
                 .finish(),
             View::Tuple(a, ts) => f
                 .debug_tuple("Tuple")
-                .field(&a.id)
+                .field(&a.arena_id)
                 .field(&ts.iter().map(|t| t.view(a)).collect::<Vec<_>>())
                 .finish(),
         }
@@ -798,128 +715,173 @@ pub enum View<'a> {
     Tuple(&'a Arena, &'a [Term]),
 }
 
-/// The typed arena used to intern atoms, variables, strings,
-/// binaries and compound terms.  A `Arena` owns all memory for
-/// interned data.  Terms hold only indices into this arena and remain
-/// valid for the lifetime of the arena.
+/// The arena interns atoms, variables, strings, binaries, and compound terms.  
+/// An `Arena` owns all memory for interned data. Terms store only indices into
+/// this arena and remain valid as long as the epoch they belong to is alive.
+///
+/// ### Epochs
+/// The arena is divided into *epochs*. Conceptually, epochs form a stack.  
+/// Allocation begins in epoch `0`, which starts at offset `0` in all
+/// underlying storages. At any time, the user can call `begin_epoch()`.  
+/// This operation:
+/// - Freezes the current epoch (recording its byte and term offsets).  
+/// - Starts a new *active* epoch for subsequent allocations.  
+///
+/// At any point, there are `K` active epochs, where:
+/// - `K - 1` are frozen (no new data is added),  
+/// - The last one is active (all new allocations go there),  
+/// - and `K <= MAX_ALIVE_EPOCHS` (typically very small number, currently 8).  
+///
+/// Terms remain valid only while the epoch they were created in is alive.  
+///
+/// ### Truncation
+/// The arena can be truncated back to a given epoch `m`, where
+/// `0 <= m < MAX_ALIVE_EPOCHS`:  
+/// - Epoch `m` and all epochs more recent than `m` are erased in O(1).  
+/// - Terms from those epochs become invalid.  
+/// - `truncate(0)` erases all data (synonym: `clear()`).  
+/// - `truncate(current_epoch())` erases only the latest epoch  
+///   (synonym: `truncate_current()`).  
+///
+/// Conceptually, epochs form a stack: you can `push` with `begin_epoch()`
+/// and `pop` with `truncate_current()`. This makes it efficient to manage
+/// temporary, scoped allocations. For example:
+/// ```
+/// use terms::Arena;
+/// let mut arena = Arena::with_capacity(4096, 1024);
+/// let epoch = arena.begin_epoch().unwrap();
+/// // … build temporary terms here …
+/// arena.truncate(epoch).unwrap(); // frees them all at once
+/// ```
+///
+/// This is especially useful during iteration: each loop can create
+/// short-lived terms, then discard them cleanly all at once at the end.
+
 #[derive(Default, Clone, Debug)]
 pub struct Arena {
-    /// Randomly generated arena identifier.
-    /// Terms referencing an arena include this ID, which is later used to verify  
-    /// that they correspond to the correct arena when the term value is retrieved.
-    id: ArenaID,
-    /// Interned atom names.  Uses an `IndexSet` to assign a stable
-    /// index to each unique atom.  Names can be retrieved by index
-    /// without storing a separate `Vec` of names.
-    atoms: IndexSet<String>,
-    atom_alloc_count: usize,
-    /// Interned variable names.  Similar to `atoms`, this assigns a
-    /// stable index to each unique variable name.
-    vars: IndexSet<String>,
-    var_alloc_count: usize,
-    /// Interned string data stored contiguously.  Long UTF‑8 strings
-    /// are appended to this vector and referenced by index/length.
-    string_data: Vec<u8>,
-    /// Interned binary data stored contiguously.  Binary blobs longer
-    /// than the inlined capacity are appended to this vector and
-    /// referenced by index/length.
-    bin_data: Vec<u8>,
-    /// Interned compound term slices stored sequentially.  Each slice
-    /// consists of one functor atom followed by zero or more argument
-    /// terms.  The `Func` handle stores the slice index and length.
+    /// Randomly generated Arena ID
+    arena_id: ArenaID,
+
+    /// Index into the buffers of active epochs.
+    /// Always points to the "current" epoch (latest allocations).
+    current_epoch: usize,
+
+    /// Randomly generated identifiers, one per epoch.
+    /// Every handle (e.g., term, func, var) that references this arena
+    /// carries the epoch ID that was current at allocation time.
+    /// When a handle is later resolved, the epoch ID is checked to
+    /// ensure it still belongs to the same arena instance.
+    epoch_ids: [EpochID; MAX_ALIVE_EPOCHS],
+
+    /// Storage for interned atoms, variables, strings, and binary blobs.
+    /// Data are appended sequentially in the last active epoch.
+    bytes: Vec<u8>,
+
+    /// For each epoch, the starting offset into `bytes`.
+    /// Used to "rewind" or reclaim all data belonging to an expired epoch.
+    byte_start_by_epoch: [usize; MAX_ALIVE_EPOCHS],
+
+    /// Storage for compound terms (structured values).
+    /// Terms are appended sequentially in the last active epoch.
+    /// Each term is represented as a contiguous slice:
+    ///   [functor_atom, arg1, arg2, …]
+    /// The `Func` handle encodes both the slice’s starting index and length.
     terms: Vec<Term>,
+
+    /// For each epoch, the starting index into `terms`.
+    /// Used to drop/pick up all terms from an expired epoch in bulk.
+    term_start_by_epoch: [usize; MAX_ALIVE_EPOCHS],
 }
 
+pub const MAX_ALIVE_EPOCHS: usize = 8;
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ArenaID(u32);
+pub struct Epoch(usize); // Index into the buffers of active epochs.
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpochID(u32); // Random Epoch ID
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+struct ArenaID(u32); // Random Arena ID
 
 #[derive(Debug, Clone, Copy)]
 pub struct ArenaStats {
-    pub arena_id: ArenaID,
-    pub atoms: usize,
-    pub atom_allocs: usize,
-    pub vars: usize,
-    pub var_allocs: usize,
-    pub str_bytes: usize,
-    pub bin_bytes: usize,
-    pub terms: usize,
-}
-
-#[derive(Debug)]
-pub struct Marker {
-    atoms_len: usize,
-    vars_len: usize,
-    string_data_len: usize,
-    bin_data_len: usize,
-    terms_len: usize,
+    pub current_epoch: Epoch,
+    pub bytes_len: usize,
+    pub terms_len: usize,
 }
 
 impl Arena {
-    /// Create a new, empty arena.
-    pub fn new() -> Self {
+    /// Create a new, empty arena with given capacities.
+    pub fn with_capacity(bytes_capacity: usize, terms_capacity: usize) -> Self {
+        let mut epoch_ids = [EpochID(0); MAX_ALIVE_EPOCHS];
+        epoch_ids[0] = EpochID(rand::random());
+
         Self {
-            id: ArenaID(rand::random()),
-            ..Self::default()
+            arena_id: ArenaID(rand::random()),
+            current_epoch: 0,
+            epoch_ids,
+            bytes: Vec::with_capacity(bytes_capacity),
+            byte_start_by_epoch: [0; MAX_ALIVE_EPOCHS],
+            terms: Vec::with_capacity(terms_capacity),
+            term_start_by_epoch: [0; MAX_ALIVE_EPOCHS],
         }
+    }
+
+    /// Create a new, empty arena with default capacities.
+    pub fn new() -> Self {
+        Self::with_capacity(4096, 1024)
     }
 
     /// Returns stats.
     pub fn stats(&self) -> ArenaStats {
         ArenaStats {
-            arena_id: self.id,
-            atoms: self.atoms.len(),
-            atom_allocs: self.atom_alloc_count,
-            vars: self.vars.len(),
-            var_allocs: self.var_alloc_count,
-            str_bytes: self.string_data.len(),
-            bin_bytes: self.bin_data.len(),
-            terms: self.terms.len(),
-        }
-    }
-
-    /// Clears all data, including atoms and vars.
-    /// Does not shrink the allocated capacity.
-    pub fn clear_all(&mut self) {
-        self.atoms.clear();
-        self.atom_alloc_count = 0;
-        self.vars.clear();
-        self.var_alloc_count = 0;
-        self.clear();
-    }
-
-    /// Clears data excluding atoms and vars.
-    /// Does not shrink the allocated capacity.
-    pub fn clear(&mut self) {
-        self.string_data.clear();
-        self.bin_data.clear();
-        self.terms.clear();
-    }
-
-    /// Returns a marker representing the current lengths of all data structures.
-    pub fn mark(&mut self) -> Marker {
-        Marker {
-            atoms_len: self.atoms.len(),
-            vars_len: self.vars.len(),
-            string_data_len: self.string_data.len(),
-            bin_data_len: self.bin_data.len(),
+            current_epoch: Epoch(self.current_epoch),
+            bytes_len: self.bytes.len(),
             terms_len: self.terms.len(),
         }
     }
 
-    /// Truncates all data back to the given marker, including atoms and vars.
-    /// Does not shrink the allocated capacity.
-    pub fn truncate_all(&mut self, marker: Marker) {
-        self.atoms.truncate(marker.atoms_len);
-        self.vars.truncate(marker.vars_len);
-        self.truncate(marker);
+    /// Returns current epoch.
+    pub fn current_epoch(&self) -> Epoch {
+        Epoch(self.current_epoch)
     }
 
-    /// Truncates data back to the given marker, excluding atoms and vars.
+    /// Freezes current epoch and begins a new one.
+    pub fn begin_epoch(&mut self) -> Result<Epoch, TermError> {
+        let new_epoch = self.current_epoch + 1;
+        if new_epoch >= MAX_ALIVE_EPOCHS {
+            return Err(TermError::EpochOverflow);
+        }
+        self.epoch_ids[new_epoch] = EpochID(rand::random());
+        self.byte_start_by_epoch[new_epoch] = self.bytes.len();
+        self.term_start_by_epoch[new_epoch] = self.terms.len();
+        self.current_epoch = new_epoch;
+        Ok(Epoch(new_epoch))
+    }
+
+    /// Erases arena in O(1).
     /// Does not shrink the allocated capacity.
-    pub fn truncate(&mut self, marker: Marker) {
-        self.string_data.truncate(marker.string_data_len);
-        self.bin_data.truncate(marker.bin_data_len);
-        self.terms.truncate(marker.terms_len);
+    pub fn clear(&mut self) -> Result<(), TermError> {
+        self.truncate(Epoch(0))
+    }
+
+    /// Epoch `m` and all epochs more recent than `m` are erased in O(1)
+    /// Does not shrink the allocated capacity.
+    pub fn truncate_current(&mut self) -> Result<(), TermError> {
+        self.truncate(Epoch(self.current_epoch))
+    }
+
+    /// Epoch `m` and all epochs more recent than `m` are erased in O(1)
+    /// Does not shrink the allocated capacity.
+    pub fn truncate(&mut self, Epoch(m): Epoch) -> Result<(), TermError> {
+        if m > self.current_epoch {
+            return Err(TermError::InvalidEpoch(Epoch(self.current_epoch)));
+        }
+        self.bytes.truncate(self.byte_start_by_epoch[m]);
+        self.terms.truncate(self.term_start_by_epoch[m]);
+        self.current_epoch = m;
+        Ok(())
     }
 
     /// Produce a [`View`] of the given `term` that borrows from
@@ -1034,72 +996,26 @@ impl Arena {
     /// freely and does not depend on any arena.
     pub const NIL: Term = Term::NIL;
 
-    /// Intern an atom and return its id.  Reusing the same atom
-    /// repeatedly avoids additional allocations.  This uses an
-    /// `IndexSet` to map each unique atom name to a stable index.
-    fn intern_atom(&mut self, name: &str) -> AtomId {
-        // Insert the name into the set and obtain its index.  If the
-        // value already exists the existing index is returned.  The
-        // boolean indicates whether a new entry was inserted but is
-        // unused here.
-        let name: String = name.into();
-        if !name.is_inline() {
-            self.atom_alloc_count += 1;
-        }
-        let (index, _) = self.atoms.insert_full(name);
-        AtomId(index as u32)
-    }
-
-    /// Intern a variable and return its id.  Variable names share a
-    /// separate namespace from atoms.  Uses an `IndexSet` to assign
-    /// stable indices to unique variable names.
-    fn intern_var(&mut self, name: &str) -> VarId {
-        let name: String = name.into();
-        if !name.is_inline() {
-            self.var_alloc_count += 1;
-        }
-        let (index, _) = self.vars.insert_full(name);
-        VarId(index as u32)
-    }
-
-    /// Access a previously interned atom by id.  Panics if the id is
-    /// out of bounds.  The returned string slice is borrowed from the
-    /// underlying `IndexSet` entry.
-    fn atom_name<'a>(&'a self, id: AtomId) -> &'a str {
-        self.atoms
-            .get_index(id.0 as usize)
-            .expect("invalid AtomId")
-            .as_str()
-    }
-
-    /// Access a previously interned variable by id.  Panics if the id
-    /// is out of bounds.  The returned string slice is borrowed from
-    /// the underlying `IndexSet` entry.
-    fn var_name<'a>(&'a self, id: VarId) -> &'a str {
-        self.vars
-            .get_index(id.0 as usize)
-            .expect("invalid VarId")
-            .as_str()
-    }
-
-    /// Intern a long UTF‑8 string into the arena and return its slice
+    /// Intern a UTF‑8 string into the arena and return its slice
     /// descriptor.  Strings are stored in a contiguous bump vector.
-    fn intern_str(&mut self, s: &str) -> StrSlice {
-        let index = self.string_data.len();
-        self.string_data.extend_from_slice(s.as_bytes());
+    fn intern_str(&mut self, s: &str) -> Slice {
+        let index = self.bytes.len();
+        self.bytes.extend_from_slice(s.as_bytes());
         let len = s.len();
-        StrSlice {
+        Slice {
+            epoch_id: self.epoch_ids[self.current_epoch],
             index: index as u32,
             len: len as u32,
         }
     }
 
     /// Intern a binary blob into the arena and return its slice descriptor.
-    fn intern_bin(&mut self, bytes: &[u8]) -> BinSlice {
-        let index = self.bin_data.len();
-        self.bin_data.extend_from_slice(bytes);
+    fn intern_bytes(&mut self, bytes: &[u8]) -> Slice {
+        let index = self.bytes.len();
+        self.bytes.extend_from_slice(bytes);
         let len = bytes.len();
-        BinSlice {
+        Slice {
+            epoch_id: self.epoch_ids[self.current_epoch],
             index: index as u32,
             len: len as u32,
         }
@@ -1110,7 +1026,7 @@ impl Arena {
         &mut self,
         functor: Term,
         args: impl IntoIterator<Item = impl IntoTerm>,
-    ) -> TermSlice {
+    ) -> Slice {
         let index = self.terms.len();
         self.terms.push(functor);
         for x in args {
@@ -1118,21 +1034,23 @@ impl Arena {
             self.terms.push(t);
         }
         let len = self.terms.len() - index;
-        TermSlice {
+        Slice {
+            epoch_id: self.epoch_ids[self.current_epoch],
             index: index as u32,
             len: len as u32,
         }
     }
 
     /// Intern a seq term slice into the term arena.
-    fn intern_seq(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> TermSlice {
+    fn intern_seq(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Slice {
         let index = self.terms.len();
         for x in terms {
             let t = x.into_term(self);
             self.terms.push(t);
         }
         let len = self.terms.len() - index;
-        TermSlice {
+        Slice {
+            epoch_id: self.epoch_ids[self.current_epoch],
             index: index as u32,
             len: len as u32,
         }
@@ -1143,7 +1061,7 @@ impl Arena {
         &mut self,
         terms: impl IntoIterator<Item = impl IntoTerm>,
         tail: impl IntoTerm,
-    ) -> TermSlice {
+    ) -> Slice {
         let index = self.terms.len();
         for x in terms {
             let t = x.into_term(self);
@@ -1152,79 +1070,47 @@ impl Arena {
         let t = tail.into_term(self);
         self.terms.push(t);
         let len = self.terms.len() - index;
-        TermSlice {
+        Slice {
+            epoch_id: self.epoch_ids[self.current_epoch],
             index: index as u32,
             len: len as u32,
         }
     }
 
-    /// Borrow a UTF‑8 string slice stored in the arena.  This function
+    /// Borrow a slice of bytes stored in the arena.
     /// should not be called directly by users; instead use
     /// [`Term::view`].
-    fn str_slice<'a>(&'a self, slice: StrSlice) -> &'a [u8] {
-        &self.string_data[(slice.index as usize)..((slice.index + slice.len) as usize)]
+    fn byte_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [u8], TermError> {
+        Ok(&self.bytes[(slice.index as usize)..((slice.index + slice.len) as usize)])
     }
 
-    /// Borrow a binary slice stored in the arena.
-    fn bin_slice<'a>(&'a self, slice: BinSlice) -> &'a [u8] {
-        &self.bin_data[(slice.index as usize)..((slice.index + slice.len) as usize)]
-    }
-
-    /// Borrow a contiguous slice of terms comprising a compound term.
-    fn term_slice<'a>(&'a self, slice: TermSlice) -> &'a [Term] {
-        &self.terms[(slice.index as usize)..((slice.index + slice.len) as usize)]
+    /// Borrow a slice of terms comprising a compound term.
+    fn term_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [Term], TermError> {
+        Ok(&self.terms[(slice.index as usize)..((slice.index + slice.len) as usize)])
     }
 }
 
-/// Identifiers for atoms interned in an arena.  Atom identifiers are
-/// opaque and refer into the [`Arena`].  They do not carry any
-/// lifetime and may be copied freely.
-#[derive(Debug, Clone, Copy)]
-pub struct AtomId(pub u32);
-
-/// Identifiers for variables interned in an arena.
-#[derive(Debug, Clone, Copy)]
-pub struct VarId(pub u32);
-
-/// A slice descriptor for interned strings.  Contains an index into
-/// the arena's `string_data` vector and a length.  Slices are
-/// referenced by [`Term`] through their encoded payload.
-#[derive(Debug, Clone, Copy)]
-struct StrSlice {
-    index: u32,
-    len: u32,
-}
-
-/// A slice descriptor for interned binary blobs.
-#[derive(Debug, Clone, Copy)]
-struct BinSlice {
-    index: u32,
-    len: u32,
-}
-
-/// A slice descriptor for interned compound terms.  Contains the
-/// index and length of the slice into the arena's term storage.
-#[derive(Debug, Clone, Copy)]
-struct TermSlice {
-    index: u32,
-    len: u32,
-}
-
-/// Errors that may occur when constructing terms.
+/// Errors that may occur when constructing terms or interacting with arena.
 #[derive(Debug, Clone)]
 pub enum TermError {
     /// The term comes from a different arena.
-    ArenaMismatch(ArenaID, Term),
+    InvalidTerm(EpochID, Term),
+    InvalidEpoch(Epoch),
+    EpochOverflow,
 }
 
 impl fmt::Display for TermError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TermError::ArenaMismatch(arena_id, term) => write!(
-                f,
-                "The term comes from a different arena: arena {:?}, term {:?}",
-                arena_id, term
-            ),
+            TermError::InvalidTerm(epoch_id, term) => {
+                write!(f, "Invalid term: epoch_id {:?}, term {:?}", epoch_id, term)
+            }
+            TermError::InvalidEpoch(epoch) => {
+                write!(f, "Invalid epoch {:?}", epoch)
+            }
+            TermError::EpochOverflow => {
+                write!(f, "Epoch overflow")
+            }
         }
     }
 }
@@ -1688,22 +1574,22 @@ mod tests {
         let a = &mut Arena::new();
 
         let t1 = a.str("a".repeat(1000));
-        let t5 = atom!("x".repeat(100) => a);
-        let t6 = var!("X".repeat(200) => a);
-        let t7 = a.bin(b"x".repeat(5000));
-        let m1 = a.mark();
+        let _t5 = atom!("x".repeat(100) => a);
+        let _t6 = var!("X".repeat(200) => a);
+        let _t7 = a.bin(b"x".repeat(5000));
+        let epoch1 = a.begin_epoch().unwrap();
         dbg!(a.stats());
-        dbg!(&m1);
+        dbg!(&epoch1);
         let t2 = a.str("b".repeat(2000));
         let t3 = a.bin(b"b".repeat(3000));
-        let t4 = list![t1, t2, t3];
-        let t5 = atom!("z".repeat(4000) => a);
-        let t8 = var!("Z".repeat(2000) => a);
-        let t7 = a.bin(b"z".repeat(10_000));
-        let m2 = a.mark();
+        let _t4 = list![t1, t2, t3];
+        let _t5 = atom!("z".repeat(4000) => a);
+        let _t8 = var!("Z".repeat(2000) => a);
+        let _t7 = a.bin(b"z".repeat(10_000));
+        let epoch2 = a.begin_epoch().unwrap();
         dbg!(a.stats());
-        dbg!(&m2);
-        a.truncate(m2);
+        dbg!(&epoch2);
+        a.truncate(epoch2).unwrap();
         dbg!(a.stats());
     }
 }
