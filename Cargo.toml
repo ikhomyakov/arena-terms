@@ -1,8 +1,17 @@
 [package]
-name = "terms"
+name = "arena-terms"
+authors = ["IKH Software, Inc. <support@ikhsoftware.com>"]
 version = "0.1.0"
 edition = "2024"
+keywords = ["prolog", "logic", "term", "symbolic", "arena", "immutable", "interning", "dsl", "unification", "pattern-matching"]
+categories = ["data-structures", "memory-management"]
+description = "A lightweight, arena-backed representation of Prolog–like terms"
+license = "LGPL-3.0-or-later"
+readme = "README.md"
+repository = "https://github.com/ikhomyakov/arena-terms.git"
+rust-version = "1.89"
 
 [dependencies]
 rand = "0.9.2"
 smartstring = "1.0.1"
+

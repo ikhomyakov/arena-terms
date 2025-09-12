@@ -1,5 +1,9 @@
 # Prolog‑like term library
 
+Copyright (c) 2005–2025 IKH Software, Inc. <support@ikhsoftware.com>
+Released under the terms of the GNU Lesser General Public License, version 3.0
+or (at your option) any later version (LGPL-3.0-or-later).
+
 This document describes the design and API of the supplied **arena-backed term library**.
 The library provides a compact, copyable \[`Term`] type for representing Prolog-like data structures, together with an \[`Arena`] that interns atoms, variables, strings, binaries, and compound terms.
 All interned data resides in the `Arena`, while a `Term` itself is just a 16-byte handle containing a tag and an index into the arena’s storage.
@@ -18,7 +22,7 @@ The crate also provides a trait \[`IntoTerm`] for automatic conversion of many R
 Here is a quick example that demonstrates how to construct terms and inspect them using Rust’s pattern matching:
 
 ```rust
-use aterms::{Arena, func, list, tuple, var, View};
+use arena_terms::{Arena, func, IntoTerm, list, tuple, var, View};
 
 // create an arena
 let mut arena = Arena::new();
@@ -48,7 +52,7 @@ if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
     assert_eq!(args.len(), 5);
     // view nested terms recursively
     match args[2].view(ar).unwrap() {
-        View::List(_, elems, _) => assert_eq!(elems.len(), 3),
+        View::List(_, elems, _) => assert_eq!(elems.len(), 4),
         _ => unreachable!(),
     }
 }
@@ -66,7 +70,7 @@ The type provides associated functions to create primitive values:
 * **`Term::int(i: impl Into<i64>) -> Term`** – constructs an integer term.  The full two’s‑complement representation is stored.  For example:
 
 ```rust
-use aterms::{Arena, Term};
+use arena_terms::{Arena, Term};
 
 let t1 = Term::int(42);      // 64‑bit integer
 let t2 = Term::int(-7_i32);  // integers are widened to i64
@@ -106,7 +110,7 @@ In addition to these constructors, the type defines two constants:
 A \[`Term`] can be decoded into a borrowed view using the `view` method.  `Term::view(&self, arena: &Arena) -> Result<View<'_>, TermError>` verifies that the supplied arena matches the term’s arena ID and then decodes inlined data or dereferences indices.  If the wrong arena is passed, an error of type `TermError::ArenaMismatch` is returned.  The [`Arena::view`](#arena) method forwards to `Term::view` and can be used symmetrically.
 
 ```rust
-use aterms::{Arena, Term, View};
+use arena_terms::{Arena, Term, View};
 
 let mut arena = Arena::new();
 let atom = Term::atom(&mut arena, "hello");
@@ -130,7 +134,7 @@ Because a `View` borrows from the arena, its lifetime ties together both the are
 An \[`Arena`] owns all interned data and ensures that terms remain valid for the arena’s lifetime.  Each arena has a randomly generated `ArenaID`; terms carry this ID so that `view` can detect mismatches.  Creating a new arena is straightforward:
 
 ```rust
-use aterms::Arena;
+use arena_terms::Arena;
 
 let mut arena = Arena::new();
 ```
@@ -142,7 +146,7 @@ Interning occurs only when necessary.  Very short names and sequences are stored
 The following example creates a handful of terms and views them:
 
 ```rust
-use aterms::{Arena, View};
+use arena_terms::{Arena, View};
 
 let mut a = Arena::new();
 let x = a.atom("foo");
@@ -201,7 +205,7 @@ The ordering is defined first by the *kind* of the term, and then by a *value-ba
 This ordering allows you to sort or deduplicate `View` values using standard collections:
 
 ```rust
-use aterms::{Arena, View};
+use arena_terms::{Arena, View};
 use std::cmp::Ordering;
 
 let mut arena = Arena::new();
@@ -232,7 +236,7 @@ Because of these implementations you rarely need to call `Term::int` or similar 
 The following demonstrates `IntoTerm` in action:
 
 ```rust
-use aterms::{Arena, Term};
+use arena_terms::{Arena, Term};
 
 let list = arena.list([1, 2, 3]);
 
@@ -255,7 +259,7 @@ let lazy = Term::func(&mut arena, "lazy", [|arena: &mut Arena| arena.atom("ok")]
 Rust’s `From` trait is implemented for common numeric types.  Converting from an integer type (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`) into a `Term` calls `Term::int` and widens the value to `i64`.  Converting from a floating type (`f32`, `f64`) calls `Term::real`.  These implementations allow you to write `Term::from(42u8)` or use `.into()` in place of an explicit call to `int` or `real`:
 
 ```rust
-use aterms::Term;
+use arena_terms::Term;
 
 let i: Term = 10u32.into();     // calls Term::int
 let f: Term = 3.14f32.into();   // calls Term::real
@@ -289,7 +293,7 @@ Arguments can be any type implementing `IntoTerm`.  The improper form (`; tail`)
 Example:
 
 ```rust
-use aterms::{Arena, list};
+use arena_terms::{Arena, list};
 
 let mut arena = Arena::new();
 
@@ -317,7 +321,7 @@ tuple![ a, b, c => &mut arena ]
 Example:
 
 ```rust
-use aterms::{Arena, tuple};
+use arena_terms::{Arena, tuple};
 
 let mut arena = Arena::new();
 
@@ -339,7 +343,7 @@ func![ "name"; arg1, arg2, ... => &mut arena ]
 Example:
 
 ```rust
-use aterms::{Arena, func, list, tuple, nil, unit};
+use arena_terms::{Arena, func, list, tuple, nil, unit};
 
 let mut a = Arena::new();
 
@@ -388,7 +392,7 @@ The remaining macros construct special terms that do not require an arena:
 The following example demonstrates how the pieces fit together to build a complex term and inspect it:
 
 ```rust
-use aterms::{Arena, func, list, tuple, var, View};
+use arena_terms::{Arena, func, IntoTerm, list, tuple, var, View};
 
 // create an arena
 let mut arena = Arena::new();

@@ -114,5 +114,5 @@ Arena-based handles are best for workloads with many terms, heavy reuse, or deep
 
 Direct enums remain idiomatic and simple, ideal for small projects, teaching, or prototypes. However, they tie **API expressiveness to storage layout**, leading to inefficiencies and less precise pattern matching. At scale, they incur scattered allocations and costly deep clones.
 
-You can find a reference arena-based, Prolog-like term implementation—featuring a term parser with dynamic operators and a pretty-printer—at [https://github.com/ikhomyakov/aterms.git](https://github.com/ikhomyakov/aterms.git).
+You can find a reference arena-based, Prolog-like term implementation—featuring a term parser with dynamic operators and a pretty-printer—at [https://github.com/ikhomyakov/arena-terms.git](https://github.com/ikhomyakov/arena-terms.git).
 
