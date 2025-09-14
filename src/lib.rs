@@ -1,4 +1,5 @@
 //! Copyright (c) 2005–2025 IKH Software, Inc. <support@ikhsoftware.com>
+//!
 //! Released under the terms of the GNU Lesser General Public License, version 3.0
 //! or (at your option) any later version (LGPL-3.0-or-later).
 //!
