@@ -382,6 +382,32 @@ impl Term {
         )))
     }
 
+    /// Construct a new compound term by interning the functor and its arguments
+    /// into the arena as a sequence of terms (functor first, then arguments).
+    /// A functor with no arguments yields the atom itself.  Errors if
+    /// no functor is provided or if the first term is not an atom.
+    #[inline]
+    pub fn funcv(
+        arena: &mut Arena,
+        terms: impl IntoIterator<Item = impl IntoTerm>,
+    ) -> Result<Self, TermError> {
+        let mut terms = terms.into_iter();
+        let Some(functor_atom) = terms.next() else {
+            return Err(TermError::MissingFunctor);
+        };
+        let functor_atom = functor_atom.into_term(arena);
+        if !functor_atom.is_atom() {
+            return Err(TermError::InvalidFunctor(functor_atom));
+        }
+        let Some(first) = terms.next() else {
+            return Ok(functor_atom);
+        };
+        Ok(Self(Handle::FuncRef(arena.intern_func(
+            functor_atom,
+            std::iter::once(first).chain(terms),
+        ))))
+    }
+
     /// Constructs a new list. A list is represented as a compound term
     /// with the functor `list`.
     #[inline]
@@ -1090,6 +1116,18 @@ impl Arena {
         Term::func(self, functor, args)
     }
 
+    /// Construct a new compound term by interning the functor and its arguments
+    /// into the arena as a sequence of terms (functor first, then arguments).
+    /// A functor with no arguments yields the atom itself.  Errors if
+    /// no functor is provided or if the first term is not an atom.
+    #[inline]
+    pub fn funcv(
+        &mut self,
+        terms: impl IntoIterator<Item = impl IntoTerm>,
+    ) -> Result<Term, TermError> {
+        Term::funcv(self, terms)
+    }
+
     pub fn list(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Term {
         Term::list(self, terms)
     }
@@ -1218,6 +1256,8 @@ pub enum TermError {
     InvalidTerm(Term),
     LiveEpochsExceeded,
     InvalidEpoch(EpochID),
+    MissingFunctor,
+    InvalidFunctor(Term),
 }
 
 impl fmt::Display for TermError {
@@ -1231,6 +1271,12 @@ impl fmt::Display for TermError {
             }
             TermError::InvalidEpoch(epoch_id) => {
                 write!(f, "Invalid epoch {:?}", epoch_id)
+            }
+            TermError::MissingFunctor => {
+                write!(f, "Missing functor")
+            }
+            TermError::InvalidFunctor(term) => {
+                write!(f, "Invalid functor {:?}", term)
             }
         }
     }
@@ -1756,5 +1802,23 @@ mod tests {
         dbg!(&epoch2);
         a.truncate(epoch2).unwrap();
         dbg!(a.stats());
+    }
+
+    #[test]
+    fn funcv() {
+        let a = &mut Arena::new();
+        let xs = [a.atom("foo"), a.atom("x"), a.atom("y")];
+        let x = a.funcv(xs).unwrap();
+        let ys = [a.atom("x"), a.atom("y")];
+        let y = a.func("foo", ys);
+        assert_eq!(x.arity(), y.arity());
+        if let Ok(View::Func(_, functor, args)) = x.view(&a) {
+            assert_eq!(functor, "foo");
+            assert_eq!(args.len(), 2);
+        }
+        if let Ok(View::Func(_, functor, args)) = y.view(&a) {
+            assert_eq!(functor, "foo");
+            assert_eq!(args.len(), 2);
+        }
     }
 }
