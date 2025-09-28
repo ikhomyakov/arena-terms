@@ -1,9 +1,21 @@
 # Prolog‑like term library
 
+## License
+
 Copyright (c) 2005–2025 IKH Software, Inc. <support@ikhsoftware.com>
 
 Released under the terms of the GNU Lesser General Public License, version 3.0
 or (at your option) any later version (LGPL-3.0-or-later).
+
+See [LICENSE.md](./LICENSE.md) for details.
+
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
+
+## Overview
 
 This document describes the design and API of the supplied **arena-backed term library**.
 The library provides a compact, copyable \[`Term`] type for representing Prolog-like data structures, together with an \[`Arena`] that interns atoms, variables, strings, binaries, and compound terms.
