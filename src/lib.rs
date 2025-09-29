@@ -792,7 +792,7 @@ impl Term {
     #[inline]
     pub fn func_name<'a>(&'a self, arena: &'a Arena) -> Result<&'a str, TermError> {
         let (functor, _) = arena.unpack_func_any(self, &[])?;
-        arena.unpack_atom(functor, &[])
+        arena.atom_name(functor)
     }
 
     /// Returns a string describing the kind of this term.
@@ -1334,7 +1334,7 @@ impl Arena {
     pub fn name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
         match self.view(term)? {
             View::Var(name) | View::Atom(name) => Ok(name),
-            View::Func(ar, functor, _) => Ok(functor.unpack_atom(ar, &[])?),
+            View::Func(ar, functor, _) => Ok(functor.atom_name(ar)?),
             _ => Err(TermError::UnexpectedKind {
                 expected: "var, atom, func",
                 found: term.kind_name(),
@@ -1358,7 +1358,7 @@ impl Arena {
     #[inline]
     pub fn func_name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
         let (functor, _) = self.unpack_func_any(term, &[])?;
-        self.unpack_atom(functor, &[])
+        self.atom_name(functor)
     }
 
     /// Returns the value if `term` is an integer, otherwise an error.
@@ -1484,7 +1484,7 @@ impl Arena {
                     return Err(TermError::InvalidTerm(*term));
                 }
                 if !allowed_names.is_empty() {
-                    let name = self.unpack_atom(functor, &[])?;
+                    let name = self.atom_name(functor)?;
                     if !allowed_names.contains(&name) {
                         return Err(TermError::UnexpectedName(*term));
                     }
@@ -2031,25 +2031,36 @@ macro_rules! nil {
     };
 }
 
-/// A wrapper that pairs a [`Term`] with the [`Arena`] it was interned in.
+/// A wrapper that ties together a [`Term`] and its [`Arena`], forming the
+/// basis for configurable pretty-printing. This type is designed as the
+/// foundation on which flexible formatting and printing of terms will be built.
 ///
-/// This type implements [`fmt::Display`], allowing you to use
-/// standard formatting macros (`format!`, `println!`, etc.) on terms
-/// without manually passing the arena each time.
+/// It already implements [`fmt::Display`], so you can seamlessly use it with
+/// standard formatting macros (`format!`, `println!`, etc.) to render
+/// terms. In the future, it will also support additional, customizable
+/// formatting options for advanced pretty-printing.
 ///
-/// Typically you don’t construct this struct directly, but instead
-/// call [`Term::display`] or [`Arena::display`], which create it for you.
+/// ### Example
+/// ```rust
+/// use arena_terms::{Term, Arena, func, IntoTerm};
+/// let mut arena = Arena::new();
+/// let term = func!("foo"; 1, "hello, world!" => &mut arena);
+///
+/// println!("{}", term.display(&arena));
+/// ```
+///
+/// Construct instances via [`Term::display`] or [`Arena::display`].
 pub struct TermDisplay<'a> {
     /// The interned term to display.
-    pub term: &'a Term,
+    term: &'a Term,
     /// The arena where the term is stored.
-    pub arena: &'a Arena,
+    arena: &'a Arena,
 }
 
 impl Term {
     /// Return a [`TermDisplay`] suitable for formatting with [`fmt::Display`].
     ///
-    /// Use this method when you want the simplest way to print a term:
+    /// Use this method when you want to render a term:
     ///
     /// ```ignore
     /// println!("{}", term.display(&arena));
@@ -2060,19 +2071,8 @@ impl Term {
     }
 }
 
-/// Because a `Term` alone does not carry enough information to render
-/// a human-readable representation, it must be paired with the `Arena`
-/// it was interned into. The [`TermDisplay`] adapter provides this
-/// pairing and implements [`fmt::Display`] for convenient printing.
-///
-/// ### Example
-/// ```rust
-/// use arena_terms::{Term, Arena, func, IntoTerm};
-/// let mut arena = Arena::new();
-/// let term = func!("foo"; 1, "hello, world!" => &mut arena);
-///
-/// println!("{}", term.display(&arena));
-/// ```
+/// Implements [`fmt::Display`] for [`TermDisplay`], enabling it to be
+/// formatted and printed with standard formatting macros.
 impl<'a> fmt::Display for TermDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn is_unquoted_atom(s: &str) -> bool {
@@ -2085,7 +2085,7 @@ impl<'a> fmt::Display for TermDisplay<'a> {
         }
 
         fn write_atom(f: &mut fmt::Formatter<'_>, arena: &Arena, functor: &Term) -> fmt::Result {
-            let s = arena.unpack_atom(functor, &[]).map_err(|_e| fmt::Error)?;
+            let s = arena.atom_name(functor).map_err(|_e| fmt::Error)?;
             write_atom_str(f, s)
         }
 
@@ -2263,7 +2263,7 @@ mod tests {
         dbg!(arena.stats());
         assert!(p.is_func());
         if let Ok(View::Func(_, functor, args)) = p.view(&arena) {
-            assert_eq!(functor.unpack_atom(&arena, &[]).unwrap(), "foo");
+            assert_eq!(functor.atom_name(&arena).unwrap(), "foo");
             assert_eq!(p.arity(), 6);
             assert_eq!(args.len(), 6);
         } else {
@@ -2695,7 +2695,7 @@ mod tests {
 
         // Empty allowed_names means "any"
         assert_eq!(at_no.name(a).unwrap(), "bar");
-        assert_eq!(vr_no.unpack_var(a, &[]).unwrap(), "Y");
+        assert_eq!(vr_no.var_name(a).unwrap(), "Y");
     }
 
     #[test]
@@ -2797,8 +2797,8 @@ mod tests {
 
         let not_atom = Term::int(1);
         let not_var = Term::str(a, "X");
-        assert!(not_atom.unpack_atom(a, &[]).is_err());
-        assert!(not_var.unpack_var(a, &[]).is_err());
+        assert!(not_atom.atom_name(a).is_err());
+        assert!(not_var.var_name(a).is_err());
     }
 
     #[test]
@@ -2807,7 +2807,7 @@ mod tests {
 
         // tuple is not a func
         let tup = Term::tuple(a, &[Term::int(1), Term::int(2)]);
-        assert!(tup.unpack_func_any(a, &[]).is_err());
+        assert!(tup.func_name(a).is_err());
         assert!(tup.unpack_func::<2>(a, &[]).is_err());
 
         // atom can be unpacked with unpack_func* functions
