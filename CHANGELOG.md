@@ -1,5 +1,125 @@
 # Release Notes
 
+## [0.3.0] — 2025-09-29
+
+### Added
+
+- `Term::atom_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::atom_name(&self, term: &Term)` — resolve an atom’s name to `&str`.
+- `Term::var_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::var_name(&self, term: &Term)` — resolve a variable’s name to `&str`.
+- `Term::func_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::func_name(&self, term: &Term)` — resolve a compound term’s name to `&str`.
+
+**Quick examples**
+```rust
+let mut arena = Arena::new();
+let a = arena.atom("hello");
+let v = arena.var("X");
+let f = func!("pair"; a, v => &mut arena);
+
+assert_eq!(arena.atom_name(&a)?, "hello");
+assert_eq!(arena.var_name(&v)?, "X");
+assert_eq!(arena.func_name(&ar)?, "pair");
+```
+
+### ⚠️  Breaking Changes
+
+* **`View::Func` now carries the functor as a `&Term` (atom) instead of `&str`.**
+  New shape:
+
+  ```rust
+  View::Func(&'a Arena, &'a Term, &'a [Term])
+  ```
+
+  This makes `View` consistent with other places that pass around terms, enables richer inspection of the functor (e.g., identity checks, reusing it as a term), and avoids premature string extraction.
+
+* **`unpack_func_any`, `unpack_func`, and `unpack_list` now validate the functor as a `&Term` (atom) instead of a `&str`,** matching `View::Func`. Names are only resolved when needed via `atom_name`.
+
+
+**Quick examples**
+
+```rust
+let mut ar = Arena::new();
+let t = func!("foo"; 1, 2, 3 => &mut ar);
+
+match t.view(&ar)? {
+    View::Func(ar2, functor, args) => {
+        // functor is now `&Term` (atom), not `&str`
+        assert_eq!(ar.atom_name(functor)?, "foo");
+        assert_eq!(args.len(), 3);
+    }
+    _ => unreachable!(),
+}
+```
+
+### ✨ Added
+
+- `Term::func_name(&Arena) -> Result<&str, TermError>` to fetch a functor’s name directly.
+- `Term::atom_name(&Arena)` and `Term::var_name(&Arena)` helpers for retrieving atom/variable names without using `unpack_*`.
+- `Arena::func_name(&self, &Term) -> Result<&str, TermError>` for functor name lookup via the arena.
+
+### Display & pretty-printing
+
+* Expanded docs around `TermDisplay<'a>` (`Term::display(&Arena) -> TermDisplay`) and its role as the base for future pretty-printing options. Behavior unchanged.
+
+**Quick example**
+
+```rust
+let mut arena = Arena::new();
+let t = func!("greet"; "world", 42 => &mut arena);
+println!("{}", t.display(&arena));  // greet("world", 42)
+```
+
+### Upgrade Notes
+
+* **`View::Func` now returns a functor `&Term` (atom), not `&str`.**
+
+  * Before:
+
+    ```rust
+    if let View::Func(_, name, args) = t.view(&arena)? {
+        assert_eq!(name, "foo");
+    }
+    ```
+  * After:
+
+    ```rust
+    if let View::Func(_, functor, args) = t.view(&arena)? {
+        assert_eq!(arena.atom_name(functor)?, "foo");
+    }
+    ```
+
+* **`unpack_func_any` / `unpack_func` / `unpack_list` validate by functor `&Term`.**
+
+  * Before:
+
+    ```rust
+    let (name, args) = arena.unpack_func_any(&t, &[])?;
+    if name != "foo" {
+        bail!("unexpected")
+    }
+    ```
+
+
+  * After:
+
+      * To check name:
+
+        ```rust
+        let (functor, args) = arena.unpack_func_any(&t, &[])?;
+        if arena.atom_name(functor)? != "foo" {
+            bail!("unexpected")
+        }
+        ```
+      * Or compare by term view:
+
+        ```rust
+        let foo = arena.atom("foo");
+        let (functor, _) = arena.unpack_func_any(&t, &[])?;
+        if functor.view(arena)? != foo.view(arena)? {
+            bail!("unexpected")
+        }
+        ```
+
+
 ## [0.2.0] - 2025-09-28
 
 ### ⚠️  Breaking Changes
