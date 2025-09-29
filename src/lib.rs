@@ -46,7 +46,7 @@
 //!
 //! // inspect the resulting term
 //! if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
-//!     assert_eq!(functor, "example");
+//!     assert_eq!(functor.name(ar).unwrap(), "example");
 //!     assert_eq!(args.len(), 5);
 //!     // view nested terms recursively
 //!     match args[2].view(ar).unwrap() {
@@ -504,6 +504,7 @@ impl Term {
     }
 
     /// Returns the name if `term` is an atom, otherwise an error.
+    #[inline]
     pub fn unpack_atom<'a>(
         &'a self,
         arena: &'a Arena,
@@ -513,6 +514,7 @@ impl Term {
     }
 
     /// Returns the name if `term` is a variable, otherwise an error.
+    #[inline]
     pub fn unpack_var<'a>(
         &'a self,
         arena: &'a Arena,
@@ -524,39 +526,47 @@ impl Term {
     /// Returns the name and arguments if `term` is a compound term of any arity
     /// or an atom and its name is in `allowed_names` (or if `allowed_names` is empty),
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_func_any<'a>(
         &'a self,
         arena: &'a Arena,
         allowed_names: &[&str],
-    ) -> Result<(&'a str, &'a [Term]), TermError> {
+    ) -> Result<(&'a Term, &'a [Term]), TermError> {
         arena.unpack_func_any(self, allowed_names)
     }
 
     /// Returns the name and arguments if `term` is a compound term of arity `ARITY`
     /// (or an atom if `ARITY == 0`) and its name is in `allowed_names` (or if `allowed_names` is empty),
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_func<'a, const ARITY: usize>(
         &'a self,
         arena: &'a Arena,
         allowed_names: &[&str],
-    ) -> Result<(&'a str, [Term; ARITY]), TermError> {
+    ) -> Result<(&'a Term, [Term; ARITY]), TermError> {
         arena.unpack_func(self, allowed_names)
     }
 
     /// Returns the slice with list elements and the tail if `term` is a list,
     /// otherwise returns an error.
-    pub fn unpack_list<'a>(&'a self, arena: &'a Arena) -> Result<(&'a [Term], Term), TermError> {
+    #[inline]
+    pub fn unpack_list<'a>(
+        &'a self,
+        arena: &'a Arena,
+    ) -> Result<(&'a [Term], &'a Term), TermError> {
         arena.unpack_list(self)
     }
 
     /// Returns the slice with tuple elements if `term` is a tuple of any arity,
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_tuple_any<'a>(&'a self, arena: &'a Arena) -> Result<&'a [Term], TermError> {
         arena.unpack_tuple_any(self)
     }
 
     /// Returns the tuple elements if `term` is a tuple of arity `ARITY`,
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_tuple<const ARITY: usize>(
         &self,
         arena: &Arena,
@@ -624,20 +634,7 @@ impl Term {
                     .term_slice(fr)
                     .map_err(|_| TermError::InvalidTerm(*self))?;
                 // Functor is the first element of the slice
-                let functor = match &slice[0].0 {
-                    Handle::Atom(a) => {
-                        let s_bytes = &a.bytes[..a.len as usize];
-                        unsafe { core::str::from_utf8_unchecked(s_bytes) }
-                    }
-                    Handle::AtomRef(ar2) => unsafe {
-                        core::str::from_utf8_unchecked(
-                            arena
-                                .byte_slice(ar2)
-                                .map_err(|_| TermError::InvalidTerm(*self))?,
-                        )
-                    },
-                    _ => panic!("invalid functor"),
-                };
+                let functor = &slice[0];
                 let args = &slice[1..];
                 Ok(View::Func(arena, functor, args))
             }
@@ -771,10 +768,31 @@ impl Term {
         }
     }
 
-    /// Returns the "name" of a compund term, an atom, or a variable.
+    /// Returns the name of a compound term, atom, or variable.
+    /// Use [`atom_name`], [`func_name`], or [`var_name`]
+    /// to ensure the term is of a specific kind.
     #[inline]
     pub fn name<'a>(&'a self, arena: &'a Arena) -> Result<&'a str, TermError> {
         arena.name(self)
+    }
+
+    /// Returns the name of an atom,
+    #[inline]
+    pub fn atom_name<'a>(&'a self, arena: &'a Arena) -> Result<&'a str, TermError> {
+        arena.unpack_atom(self, &[])
+    }
+
+    /// Returns the name of a variable.
+    #[inline]
+    pub fn var_name<'a>(&'a self, arena: &'a Arena) -> Result<&'a str, TermError> {
+        arena.unpack_var(self, &[])
+    }
+
+    /// Returns the name of a compund term.
+    #[inline]
+    pub fn func_name<'a>(&'a self, arena: &'a Arena) -> Result<&'a str, TermError> {
+        let (functor, _) = arena.unpack_func_any(self, &[])?;
+        arena.unpack_atom(functor, &[])
     }
 
     /// Returns a string describing the kind of this term.
@@ -948,7 +966,7 @@ pub enum View<'a> {
     /// of arguments.  Both the functor and the argument slice are
     /// borrowed; the arguments themselves are `Term` handles owned
     /// by the arena.
-    Func(&'a Arena, &'a str, &'a [Term]),
+    Func(&'a Arena, &'a Term, &'a [Term]),
     /// A list view containing a slice of the list elements
     /// and a reference to the tail term. The element slice and the tail are
     /// borrowed; the elements themselves are `Term` handles owned by the arena.
@@ -1276,12 +1294,14 @@ impl Arena {
 
     /// Constructs a new list. A list is represented internally as an
     /// array of terms. If `terms` is empty, returns `nil`.
+    #[inline]
     pub fn list(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Term {
         Term::list(self, terms)
     }
 
     /// Constructs a new improper list. An improper list is represented as
     /// a list and additional argument. If `terms` is empty, returns `nil`.
+    #[inline]
     pub fn listc(
         &mut self,
         terms: impl IntoIterator<Item = impl IntoTerm>,
@@ -1292,6 +1312,7 @@ impl Arena {
 
     /// Constructs a new tuple. A tuple is represented internally as an array
     /// of terms.
+    #[inline]
     pub fn tuple(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Term {
         Term::tuple(self, terms)
     }
@@ -1306,11 +1327,14 @@ impl Arena {
     /// freely and does not depend on any arena.
     pub const NIL: Term = Term::NIL;
 
-    /// Returns the "name" of a compund term, an atom, or a variable.
+    /// Returns the name of a compound term, atom, or variable.
+    /// Use [`unpack_atom`], [`unpack_func`], or [`unpack_var`]
+    /// to ensure the term is of a specific kind.
     #[inline]
     pub fn name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
         match self.view(term)? {
-            View::Var(name) | View::Atom(name) | View::Func(_, name, _) => Ok(name),
+            View::Var(name) | View::Atom(name) => Ok(name),
+            View::Func(ar, functor, _) => Ok(functor.unpack_atom(ar, &[])?),
             _ => Err(TermError::UnexpectedKind {
                 expected: "var, atom, func",
                 found: term.kind_name(),
@@ -1318,7 +1342,27 @@ impl Arena {
         }
     }
 
+    /// Returns the name of an atom,
+    #[inline]
+    pub fn atom_name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
+        self.unpack_atom(term, &[])
+    }
+
+    /// Returns the name of a variable.
+    #[inline]
+    pub fn var_name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
+        self.unpack_var(term, &[])
+    }
+
+    /// Returns the name of a compund term.
+    #[inline]
+    pub fn func_name<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
+        let (functor, _) = self.unpack_func_any(term, &[])?;
+        self.unpack_atom(functor, &[])
+    }
+
     /// Returns the value if `term` is an integer, otherwise an error.
+    #[inline]
     pub fn unpack_int(&self, term: &Term) -> Result<i64, TermError> {
         match self.view(term)? {
             View::Int(v) => Ok(v),
@@ -1330,6 +1374,7 @@ impl Arena {
     }
 
     /// Returns the value if `term` is a real, otherwise an error.
+    #[inline]
     pub fn unpack_real(&self, term: &Term) -> Result<f64, TermError> {
         match self.view(term)? {
             View::Real(v) => Ok(v),
@@ -1341,6 +1386,7 @@ impl Arena {
     }
 
     /// Returns the value if `term` is a date, otherwise an error.
+    #[inline]
     pub fn unpack_date(&self, term: &Term) -> Result<i64, TermError> {
         match self.view(term)? {
             View::Date(v) => Ok(v),
@@ -1352,6 +1398,7 @@ impl Arena {
     }
 
     /// Returns the string slice if `term` is a string, otherwise an error.
+    #[inline]
     pub fn unpack_str<'a>(&'a self, term: &'a Term) -> Result<&'a str, TermError> {
         match self.view(term)? {
             View::Str(v) => Ok(v),
@@ -1363,6 +1410,7 @@ impl Arena {
     }
 
     /// Returns the slice if `term` is a binary blob, otherwise an error.
+    #[inline]
     pub fn unpack_bin<'a>(&'a self, term: &'a Term) -> Result<&'a [u8], TermError> {
         match self.view(term)? {
             View::Bin(v) => Ok(v),
@@ -1374,6 +1422,7 @@ impl Arena {
     }
 
     /// Returns the name if `term` is an atom, otherwise an error.
+    #[inline]
     pub fn unpack_atom<'a>(
         &'a self,
         term: &'a Term,
@@ -1394,6 +1443,7 @@ impl Arena {
     }
 
     /// Returns the name if `term` is a variable, otherwise an error.
+    #[inline]
     pub fn unpack_var<'a>(
         &'a self,
         term: &'a Term,
@@ -1416,26 +1466,30 @@ impl Arena {
     /// Returns the name and arguments if `term` is a compound term of any arity
     /// or an atom and its name is in `allowed_names` (or if `allowed_names` is empty),
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_func_any<'a>(
         &'a self,
         term: &'a Term,
         allowed_names: &[&str],
-    ) -> Result<(&'a str, &'a [Term]), TermError> {
+    ) -> Result<(&'a Term, &'a [Term]), TermError> {
         match self.view(term)? {
             View::Atom(name) => {
                 if !allowed_names.is_empty() && !allowed_names.contains(&name) {
                     return Err(TermError::UnexpectedName(*term));
                 }
-                Ok((name, &[]))
+                Ok((term, &[] as &[Term]))
             }
-            View::Func(_, name, args) => {
+            View::Func(_, functor, args) => {
                 if args.is_empty() {
                     return Err(TermError::InvalidTerm(*term));
                 }
-                if !allowed_names.is_empty() && !allowed_names.contains(&name) {
-                    return Err(TermError::UnexpectedName(*term));
+                if !allowed_names.is_empty() {
+                    let name = self.unpack_atom(functor, &[])?;
+                    if !allowed_names.contains(&name) {
+                        return Err(TermError::UnexpectedName(*term));
+                    }
                 }
-                Ok((name, args))
+                Ok((functor, args))
             }
             _ => Err(TermError::UnexpectedKind {
                 expected: "func",
@@ -1447,12 +1501,13 @@ impl Arena {
     /// Returns the name and arguments if `term` is a compound term of arity `ARITY`
     /// (or an atom if `ARITY == 0`) and its name is in `allowed_names` (or if `allowed_names` is empty),
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_func<'a, const ARITY: usize>(
         &'a self,
         term: &'a Term,
         allowed_names: &[&str],
-    ) -> Result<(&'a str, [Term; ARITY]), TermError> {
-        let (name, args) = self.unpack_func_any(term, allowed_names)?;
+    ) -> Result<(&'a Term, [Term; ARITY]), TermError> {
+        let (functor, args) = self.unpack_func_any(term, allowed_names)?;
         if args.len() != ARITY {
             return Err(TermError::UnexpectedArity {
                 expected: ARITY,
@@ -1460,15 +1515,16 @@ impl Arena {
             });
         }
         let arr: [_; ARITY] = args.try_into().unwrap();
-        return Ok((name, arr));
+        return Ok((functor, arr));
     }
 
     /// Returns the slice with list elements and the tail if `term` is a list,
     /// otherwise returns an error.
-    pub fn unpack_list<'a>(&'a self, term: &'a Term) -> Result<(&'a [Term], Term), TermError> {
+    #[inline]
+    pub fn unpack_list<'a>(&'a self, term: &'a Term) -> Result<(&'a [Term], &'a Term), TermError> {
         match self.view(term)? {
-            View::Atom(_) if *term == Term::NIL => Ok((&[], Term::NIL)),
-            View::List(_, terms, tail) => Ok((terms, *tail)),
+            View::Atom(_) if term == &Term::NIL => Ok((&[], &Term::NIL)),
+            View::List(_, terms, tail) => Ok((terms, tail)),
             _ => Err(TermError::UnexpectedKind {
                 expected: "list",
                 found: term.kind_name(),
@@ -1478,6 +1534,7 @@ impl Arena {
 
     /// Returns the slice with tuple elements if `term` is a tuple of any arity,
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_tuple_any<'a>(&'a self, term: &'a Term) -> Result<&'a [Term], TermError> {
         match self.view(term)? {
             View::Atom(_) if *term == Term::UNIT => Ok(&[]),
@@ -1491,6 +1548,7 @@ impl Arena {
 
     /// Returns the tuple elements if `term` is a tuple of arity `ARITY`,
     /// otherwise returns an error.
+    #[inline]
     pub fn unpack_tuple<const ARITY: usize>(
         &self,
         term: &Term,
@@ -1508,6 +1566,7 @@ impl Arena {
 
     /// Intern a UTF‑8 string into the arena and return its slice
     /// descriptor.  Strings are stored in a contiguous bump vector.
+    #[inline]
     fn intern_str(&mut self, s: &str) -> Slice {
         let index = self.bytes.len();
         self.bytes.extend_from_slice(s.as_bytes());
@@ -1520,6 +1579,7 @@ impl Arena {
     }
 
     /// Intern a binary blob into the arena and return its slice descriptor.
+    #[inline]
     fn intern_bytes(&mut self, bytes: &[u8]) -> Slice {
         let index = self.bytes.len();
         self.bytes.extend_from_slice(bytes);
@@ -1532,6 +1592,7 @@ impl Arena {
     }
 
     /// Intern a compound term slice (functor + args) into the term arena.
+    #[inline]
     fn intern_func(
         &mut self,
         functor: Term,
@@ -1552,6 +1613,7 @@ impl Arena {
     }
 
     /// Intern a seq term slice into the term arena.
+    #[inline]
     fn intern_seq(&mut self, terms: impl IntoIterator<Item = impl IntoTerm>) -> Slice {
         let index = self.terms.len();
         for x in terms {
@@ -1567,6 +1629,7 @@ impl Arena {
     }
 
     /// Intern a seq term slice plus tail into the term arena.
+    #[inline]
     fn intern_seq_plus_one(
         &mut self,
         terms: impl IntoIterator<Item = impl IntoTerm>,
@@ -1590,12 +1653,14 @@ impl Arena {
     /// Borrow a slice of bytes stored in the arena.
     /// should not be called directly by users; instead use
     /// [`Term::view`].
+    #[inline]
     fn byte_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [u8], InternalTermError> {
         self.verify_byte_slice(slice)?;
         Ok(&self.bytes[(slice.index as usize)..((slice.index + slice.len) as usize)])
     }
 
     /// Borrow a slice of terms comprising a compound term.
+    #[inline]
     fn term_slice<'a>(&'a self, slice: &Slice) -> Result<&'a [Term], InternalTermError> {
         self.verify_term_slice(slice)?;
         Ok(&self.terms[(slice.index as usize)..((slice.index + slice.len) as usize)])
@@ -1775,7 +1840,10 @@ impl core::cmp::Ord for View<'_> {
                 if ord != Ordering::Equal {
                     return ord;
                 }
-                let ord = functor_a.cmp(functor_b);
+                let ord = functor_a
+                    .view(arena_a)
+                    .expect("arena mismatch")
+                    .cmp(&functor_b.view(arena_b).expect("arena mismatch"));
                 if ord != Ordering::Equal {
                     return ord;
                 }
@@ -2016,7 +2084,12 @@ impl<'a> fmt::Display for TermDisplay<'a> {
             chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
         }
 
-        fn write_atom(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
+        fn write_atom(f: &mut fmt::Formatter<'_>, arena: &Arena, functor: &Term) -> fmt::Result {
+            let s = arena.unpack_atom(functor, &[]).map_err(|_e| fmt::Error)?;
+            write_atom_str(f, s)
+        }
+
+        fn write_atom_str(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
             if s.is_empty() || !is_unquoted_atom(s) {
                 let escaped = s.replace('\'', "\\'");
                 write!(f, "'{}'", escaped)
@@ -2085,14 +2158,14 @@ impl<'a> fmt::Display for TermDisplay<'a> {
                 }
                 write!(f, "}}")
             }
-            View::Atom(a) => write_atom(f, a),
+            View::Atom(a) => write_atom_str(f, a),
             View::Var(v) => write!(f, "{}", v),
 
-            View::Func(ar, name, args) => {
+            View::Func(ar, functor, args) => {
                 if args.is_empty() {
                     return write!(f, "/* invalid Func */");
                 }
-                write_atom(f, name)?;
+                write_atom(f, ar, functor)?;
                 write!(f, "(")?;
                 write_args(f, ar, args)?;
                 write!(f, ")")
@@ -2141,13 +2214,13 @@ mod tests {
     }
 
     #[test]
-    fn view_size_is_32_bytes() {
-        assert_eq!(core::mem::size_of::<View>(), 48);
+    fn view_size_is_40_bytes() {
+        assert_eq!(core::mem::size_of::<View>(), 40);
     }
 
     #[test]
-    fn option_view_size_is_32_bytes() {
-        assert_eq!(core::mem::size_of::<Option<View>>(), 48);
+    fn option_view_size_is_40_bytes() {
+        assert_eq!(core::mem::size_of::<Option<View>>(), 40);
     }
 
     #[test]
@@ -2190,7 +2263,7 @@ mod tests {
         dbg!(arena.stats());
         assert!(p.is_func());
         if let Ok(View::Func(_, functor, args)) = p.view(&arena) {
-            assert_eq!(functor, "foo");
+            assert_eq!(functor.unpack_atom(&arena, &[]).unwrap(), "foo");
             assert_eq!(p.arity(), 6);
             assert_eq!(args.len(), 6);
         } else {
@@ -2352,11 +2425,11 @@ mod tests {
         let y = a.func("foo", ys);
         assert_eq!(x.arity(), y.arity());
         if let Ok(View::Func(_, functor, args)) = x.view(&a) {
-            assert_eq!(functor, "foo");
+            assert_eq!(functor.name(a).unwrap(), "foo");
             assert_eq!(args.len(), 2);
         }
         if let Ok(View::Func(_, functor, args)) = y.view(&a) {
-            assert_eq!(functor, "foo");
+            assert_eq!(functor.name(a).unwrap(), "foo");
             assert_eq!(args.len(), 2);
         }
     }
@@ -2621,7 +2694,7 @@ mod tests {
         assert!(vr_no.unpack_var(a, &allowed_vars).is_err());
 
         // Empty allowed_names means "any"
-        assert_eq!(at_no.unpack_atom(a, &[]).unwrap(), "bar");
+        assert_eq!(at_no.name(a).unwrap(), "bar");
         assert_eq!(vr_no.unpack_var(a, &[]).unwrap(), "Y");
     }
 
@@ -2636,14 +2709,14 @@ mod tests {
         // Any arity, name filtering
         {
             let (name, args) = f2.unpack_func_any(a, &["pair", "other"]).unwrap();
-            assert_eq!(name, "pair");
+            assert_eq!(name.name(a).unwrap(), "pair");
             assert_eq!(args.len(), 2);
             assert_eq!(args[0].unpack_int(a).unwrap(), 1);
             assert_eq!(args[1].unpack_int(a).unwrap(), 2);
 
             // empty allowed_names accepts anything
             let (name0, args0) = f0.unpack_func_any(a, &[]).unwrap();
-            assert_eq!(name0, "nilary");
+            assert_eq!(name0.name(a).unwrap(), "nilary");
             assert!(args0.is_empty());
 
             // disallowed name should error
@@ -2653,7 +2726,7 @@ mod tests {
         // Fixed arity (const generic)
         {
             let (name2, [x, y]) = f2.unpack_func(a, &["pair"]).unwrap();
-            assert_eq!(name2, "pair");
+            assert_eq!(name2.name(a).unwrap(), "pair");
             assert_eq!(x.unpack_int(a).unwrap(), 1);
             assert_eq!(y.unpack_int(a).unwrap(), 2);
 
@@ -2672,7 +2745,7 @@ mod tests {
         let l0 = Term::list(a, &[] as &[Term]);
         let (elems0, tail0) = l0.unpack_list(a).unwrap();
         assert!(elems0.is_empty());
-        assert_eq!(tail0, Term::NIL);
+        assert_eq!(*tail0, Term::NIL);
 
         let l3 = Term::list(a, &[Term::int(1), Term::int(2), Term::int(3)]);
         let (elems3, tail3) = l3.unpack_list(a).unwrap();
@@ -2680,7 +2753,7 @@ mod tests {
         assert_eq!(elems3[0].unpack_int(a).unwrap(), 1);
         assert_eq!(elems3[1].unpack_int(a).unwrap(), 2);
         assert_eq!(elems3[2].unpack_int(a).unwrap(), 3);
-        assert_eq!(tail3, Term::NIL);
+        assert_eq!(tail3, &Term::NIL);
 
         // Non-list should error
         let not_list = Term::int(9);
