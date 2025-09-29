@@ -2,7 +2,7 @@
 
 ## License
 
-Copyright (c) 2005–2025 IKH Software, Inc. <support@ikhsoftware.com>
+Copyright (c) 2005–2025 IKH Software, Inc.
 
 Released under the terms of the GNU Lesser General Public License, version 3.0
 or (at your option) any later version (LGPL-3.0-or-later).
@@ -443,4 +443,27 @@ if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
 ```
 
 This example shows how `IntoTerm` and the macros allow you to mix primitive Rust types, existing `Term`s and closures when constructing compound terms.  Because the macros return closures for implicit arenas, nested calls do not need to mention the arena repeatedly.  When you do provide an explicit arena (via `=> &mut arena`) the closure is applied immediately and returns a `Term`.
+
+
+## Known Issues
+
+This project is still evolving. The following limitations are known and may affect usage in certain scenarios:
+
+* **Arity of lists**
+  Calling `Term::arity()` on lists always returns `0`. This is because lists are internally represented as shallow arrays of terms, not as `cons` cells. However, users are free to represent lists using their own `'.'(H, T)` terms if desired.
+
+  * **Implications:** The provided `list` kind is not Prolog-compatible.
+  * **Performance note:** Growing a list incrementally (e.g. one element at a time) is inefficient — on each iteration a new shallow copy of the array is allocated.
+
+* **Unary tuples**
+  The `arena_terms_parser` does not support unary tuples. When parsing, it unwraps a one-element tuple instead of preserving it.
+
+  * **Implications:** Roundtrip printing and parsing of unary tuples will not return the same term.
+
+* **Variables**
+  The API currently allows creating variables with arbitrary names.
+
+  * **Implications:** Names that do not follow Prolog variable conventions may still be constructed.
+  * **Printer behavior:** The printer outputs variable names verbatim without validation. This can produce invalid term strings that cannot be parsed back.
+  * **Recommendation:** Avoid using arbitrary variable names — this will be **prohibited in future releases**. Always use names that follow the convention: `[A-Z_][A-Za-z0-9_]*`.
 

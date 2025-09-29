@@ -20,7 +20,6 @@
 //! macros exported from this crate.
 //!
 //! ## Example
-//!
 //! ```rust
 //! # use arena_terms::{Arena, func, IntoTerm, list, tuple, var, View};
 //! // create an arena
@@ -807,7 +806,7 @@ impl Term {
 /// and logging.
 ///
 /// # Example
-/// ```
+/// ```rust
 /// # use arena_terms::Term;
 /// let t = Term::int(42);
 /// println!("{:?}", t); // e.g. prints `Int(42)`
@@ -1964,9 +1963,172 @@ macro_rules! nil {
     };
 }
 
+/// A wrapper that pairs a [`Term`] with the [`Arena`] it was interned in.
+///
+/// This type implements [`fmt::Display`], allowing you to use
+/// standard formatting macros (`format!`, `println!`, etc.) on terms
+/// without manually passing the arena each time.
+///
+/// Typically you don’t construct this struct directly, but instead
+/// call [`Term::display`] or [`Arena::display`], which create it for you.
+pub struct TermDisplay<'a> {
+    /// The interned term to display.
+    pub term: &'a Term,
+    /// The arena where the term is stored.
+    pub arena: &'a Arena,
+}
+
+impl Term {
+    /// Return a [`TermDisplay`] suitable for formatting with [`fmt::Display`].
+    ///
+    /// Use this method when you want the simplest way to print a term:
+    ///
+    /// ```ignore
+    /// println!("{}", term.display(&arena));
+    /// ```
+    #[inline]
+    pub fn display<'a>(&'a self, arena: &'a Arena) -> TermDisplay<'a> {
+        TermDisplay { term: self, arena }
+    }
+}
+
+/// Because a `Term` alone does not carry enough information to render
+/// a human-readable representation, it must be paired with the `Arena`
+/// it was interned into. The [`TermDisplay`] adapter provides this
+/// pairing and implements [`fmt::Display`] for convenient printing.
+///
+/// ### Example
+/// ```rust
+/// use arena_terms::{Term, Arena, func, IntoTerm};
+/// let mut arena = Arena::new();
+/// let term = func!("foo"; 1, "hello, world!" => &mut arena);
+///
+/// println!("{}", term.display(&arena));
+/// ```
+impl<'a> fmt::Display for TermDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn is_unquoted_atom(s: &str) -> bool {
+            let mut chars = s.chars();
+            match chars.next() {
+                Some(c) if c.is_ascii_lowercase() => {}
+                _ => return false,
+            }
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+
+        fn write_atom(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
+            if s.is_empty() || !is_unquoted_atom(s) {
+                let escaped = s.replace('\'', "\\'");
+                write!(f, "'{}'", escaped)
+            } else {
+                write!(f, "{}", s)
+            }
+        }
+
+        fn write_str_quoted(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
+            let mut out = String::new();
+            out.push('"');
+            for ch in s.chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    c if c.is_control() => out.push_str(&format!("\\x{:02X}\\", c as u32)),
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+            f.write_str(&out)
+        }
+
+        fn epoch_to_date_string(epoch_ms: i64, fmt: Option<&str>) -> String {
+            use chrono::{DateTime, Utc};
+
+            let secs = epoch_ms.div_euclid(1000);
+            let nsecs = (epoch_ms.rem_euclid(1000) * 1_000_000) as u32;
+
+            let dt_utc = DateTime::<Utc>::from_timestamp(secs, nsecs).unwrap();
+
+            String::from(match fmt {
+                None => dt_utc.to_rfc3339(),
+                Some(layout) => dt_utc.format(layout).to_string(),
+            })
+        }
+
+        fn write_args(f: &mut fmt::Formatter<'_>, arena: &Arena, args: &[Term]) -> fmt::Result {
+            for (i, t) in args.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{}", t.display(arena))?;
+            }
+            Ok(())
+        }
+
+        match self.term.view(self.arena).map_err(|_e| fmt::Error)? {
+            View::Int(i) => write!(f, "{i}"),
+            View::Real(r) => {
+                if r.fract() == 0.0 {
+                    write!(f, "{:.1}", r)
+                } else {
+                    write!(f, "{}", r)
+                }
+            }
+            View::Date(epoch) => write!(f, "date({})", epoch_to_date_string(epoch, None)),
+            View::Str(s) => write_str_quoted(f, s),
+            View::Bin(bytes) => {
+                write!(f, "hex{{")?;
+                for b in bytes {
+                    write!(f, "{:02X}", b)?;
+                }
+                write!(f, "}}")
+            }
+            View::Atom(a) => write_atom(f, a),
+            View::Var(v) => write!(f, "{}", v),
+
+            View::Func(ar, name, args) => {
+                if args.is_empty() {
+                    return write!(f, "/* invalid Func */");
+                }
+                write_atom(f, name)?;
+                write!(f, "(")?;
+                write_args(f, ar, args)?;
+                write!(f, ")")
+            }
+
+            View::Tuple(ar, items) => {
+                if items.is_empty() {
+                    write!(f, "()")
+                } else {
+                    write!(f, "(")?;
+                    write_args(f, ar, items)?;
+                    write!(f, ")")
+                }
+            }
+
+            View::List(ar, items, tail) => {
+                if items.is_empty() {
+                    write!(f, "[]")
+                } else {
+                    write!(f, "[")?;
+                    write_args(f, ar, items)?;
+                    if *tail != Term::NIL {
+                        f.write_str(" | ")?;
+                        write!(f, "{}", tail.display(ar))?;
+                    }
+                    write!(f, "]")
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write;
 
     #[test]
     fn term_size_is_16_bytes() {
@@ -2002,16 +2164,16 @@ mod tests {
     }
 
     #[test]
-    fn compound_construction() {
+    fn compound_construction_and_formatting() {
         let mut arena = Arena::new();
         let a = Term::int(1);
         let b = Term::real(2.0);
         let c = Term::date(1000);
         let d = Term::atom(&mut arena, "hello");
-        let e = Term::var(&mut arena, "Hello, hello, world!");
-        let f = Term::str(&mut arena, "A str\ning.");
+        let e = Term::var(&mut arena, "Hello");
+        let f = Term::str(&mut arena, "A str\ning. Longer string.");
         let g = list![d, e, f => &mut arena];
-        let h = tuple!(f => &mut arena);
+        let h = tuple!(f, f => &mut arena);
         let p = Term::func(&mut arena, "point", &[a, b, c, d, e, f, g, h]);
         let p = func![
             "foo";
@@ -2034,6 +2196,12 @@ mod tests {
         } else {
             panic!("unexpected view");
         }
+
+        let s = format!("{}", p.display(&arena));
+        assert_eq!(
+            s,
+            "foo(nil, unit, point(1, 2.0, date(1970-01-01T00:00:01+00:00), hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), point(1, 2.0, date(1970-01-01T00:00:01+00:00), hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), nil, [1, 2.0 | date(1970-01-01T00:00:01+00:00)])"
+        );
     }
 
     #[test]
@@ -2573,5 +2741,98 @@ mod tests {
         let at = Term::atom(a, "f");
         assert!(!at.unpack_func_any(a, &[]).is_err());
         assert!(!at.unpack_func::<0>(a, &[]).is_err());
+    }
+
+    #[test]
+    fn fmt_nil_to_string() {
+        let arena = Arena::new();
+        let t = Term::NIL;
+        assert_eq!(t.display(&arena).to_string(), "nil");
+    }
+
+    #[test]
+    fn fmt_unit_format_macro() {
+        let arena = Arena::new();
+        let t = Term::UNIT;
+        assert_eq!(format!("{}", t.display(&arena)), "unit");
+    }
+
+    #[test]
+    fn fmt_int_positive() {
+        let arena = Arena::new();
+        let t = Term::int(42);
+        assert_eq!(format!("{}", t.display(&arena)), "42");
+    }
+
+    #[test]
+    fn fmt_int_negative_to_string() {
+        let arena = Arena::new();
+        let t = Term::int(-9001);
+        assert_eq!(t.display(&arena).to_string(), "-9001");
+    }
+
+    #[test]
+    fn fmt_str_quotes() {
+        let mut arena = Arena::new();
+        let t = Term::str(&mut arena, "hello");
+        assert_eq!(format!("{}", t.display(&arena)), r#""hello""#);
+    }
+
+    #[test]
+    fn fmt_str_with_escape_chars() {
+        let mut arena = Arena::new();
+        let t = Term::str(&mut arena, "a\nb\tc");
+        assert_eq!(t.display(&arena).to_string(), "\"a\\nb\\tc\"");
+    }
+
+    #[test]
+    fn fmt_date_epoch_zero() {
+        let arena = Arena::new();
+        // 0 ms -> 1970-01-01 00:00:00 UTC
+        let t = Term::date(0);
+        assert_eq!(
+            format!("{}", t.display(&arena)),
+            "date(1970-01-01T00:00:00+00:00)"
+        );
+    }
+
+    #[test]
+    fn fmt_date_epoch_ms_trunc_to_seconds() {
+        let arena = Arena::new();
+        let t = Term::date(1_234);
+        assert_eq!(
+            t.display(&arena).to_string(),
+            "date(1970-01-01T00:00:01.234+00:00)"
+        );
+    }
+
+    #[test]
+    fn fmt_date_specific_moment() {
+        let arena = Arena::new();
+        let t = Term::date(1_727_525_530_123i64);
+        assert_eq!(
+            format!("{}", t.display(&arena)),
+            "date(2024-09-28T12:12:10.123+00:00)"
+        );
+    }
+
+    #[test]
+    fn fmt_date_specific_moment_in_the_past() {
+        let arena = Arena::new();
+        let t = Term::date(-5_382_698_399_999i64);
+        assert_eq!(
+            format!("{}", t.display(&arena)),
+            "date(1799-06-06T06:00:00.001+00:00)"
+        );
+    }
+
+    #[test]
+    fn fmt_write_into_string_buffer() {
+        let arena = Arena::new();
+        let t = Term::int(7);
+        let mut buf = String::new();
+        // write! returns fmt::Result; ensure it's Ok and content matches
+        write!(&mut buf, "val={}", t.display(&arena)).expect("formatting failed");
+        assert_eq!(buf, "val=7");
     }
 }
