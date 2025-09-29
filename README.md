@@ -445,9 +445,46 @@ if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
 This example shows how `IntoTerm` and the macros allow you to mix primitive Rust types, existing `Term`s and closures when constructing compound terms.  Because the macros return closures for implicit arenas, nested calls do not need to mention the arena repeatedly.  When you do provide an explicit arena (via `=> &mut arena`) the closure is applied immediately and returns a `Term`.
 
 
-## Known Issues
+## Notes and Known Issues
 
 This project is still evolving. The following limitations are known and may affect usage in certain scenarios:
+
+* `Term` implements `PartialEq` and `PartialOrd`.  The implementations operate at the **handle level**, not at the **value level**. This means two different `Term` handles can point to the same logical value, but still compare as unequal. Likewise, ordering reflects handle identity, not term value semantics.
+
+    Example:
+
+    ```rust
+    let mut arena = Arena::new();
+    let a1 = arena.atom("x");
+    let a2 = arena.atom("x");
+
+    assert_ne!(a1, a2); // different handles, same value
+    assert_eq!(arena.atom_name(&a1)?, arena.atom_name(&a2)?); // both "x"
+    ```
+
+* `View` currently implements `Eq` and `Ord`, even though integers, real numbers (floating point), and dates (stored as integers) are compared by converting to floating point. Since floating point only provides `PartialEq` and `PartialOrd`, this design is inconsistent and will likely change in the future.
+  Planned changes:
+
+  1. Compare values within their own type (integers with integers, reals with reals, dates with dates).
+  2. Downgrade these trait implementations to `PartialEq` and `PartialOrd`.
+
+  **Note:** The companion crate `arena-terms-parser` does not currently support NaNs or infinities. As a result, the printer may produce invalid term strings that cannot be parsed back.
+
+  **Recommendation:** to compare term by **value** use `View`.
+
+    Example:
+
+    ```rust
+    let mut arena = Arena::new();
+    let a = arena.atom("apple");
+    let b = arena.atom("banana");
+
+    assert!(a.view(&arena)? < b.view(&arena)?); // "apple" < "banana"
+
+    let mut v = vec![b, a];
+    v.sort_by(|x, y| x.view(&arena)?.cmp(&y.view(&arena)?));
+    // order: apple, banana
+    ```
 
 * **Arity of lists**
   Calling `Term::arity()` on lists always returns `0`. This is because lists are internally represented as shallow arrays of terms, not as `cons` cells. However, users are free to represent lists using their own `'.'(H, T)` terms if desired.

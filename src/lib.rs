@@ -70,13 +70,13 @@ use std::cmp::Ordering;
 // variables.  Long names or sequences store an index and length into
 // the appropriate arena.
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 struct TinyArray {
     bytes: [u8; 14],
     len: u8,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 struct Slice {
     epoch_id: EpochID,
     index: u32,
@@ -89,8 +89,8 @@ struct Slice {
 /// attribute ensures the discriminant occupies a single byte, which
 /// together with the payloads yields a `Term` size of 16 bytes on
 /// 64‑bit targets.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 #[repr(u8)]
-#[derive(Copy, Clone, PartialEq)]
 enum Handle {
     Int(i64),
     Real(f64),
@@ -123,7 +123,7 @@ enum Handle {
 //       - Two different Term handles may point to the same term value, or
 //       - Two identical Term handles obtained from different arenas may
 //         represent distinct term values.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub struct Term(Handle);
 
 impl AsRef<Term> for Term {
@@ -1058,7 +1058,7 @@ pub struct Arena {
 
 pub const MAX_LIVE_EPOCHS: usize = 8;
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EpochID(u32); // Random Epoch ID
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

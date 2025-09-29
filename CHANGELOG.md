@@ -2,24 +2,6 @@
 
 ## [0.3.0] — 2025-09-29
 
-### Added
-
-- `Term::atom_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::atom_name(&self, term: &Term)` — resolve an atom’s name to `&str`.
-- `Term::var_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::var_name(&self, term: &Term)` — resolve a variable’s name to `&str`.
-- `Term::func_name(&self, arena: &Arena) -> Result<&str, TermError>` and `Arena::func_name(&self, term: &Term)` — resolve a compound term’s name to `&str`.
-
-**Quick examples**
-```rust
-let mut arena = Arena::new();
-let a = arena.atom("hello");
-let v = arena.var("X");
-let f = func!("pair"; a, v => &mut arena);
-
-assert_eq!(arena.atom_name(&a)?, "hello");
-assert_eq!(arena.var_name(&v)?, "X");
-assert_eq!(arena.func_name(&ar)?, "pair");
-```
-
 ### ⚠️  Breaking Changes
 
 * **`View::Func` now carries the functor as a `&Term` (atom) instead of `&str`.**
@@ -37,11 +19,11 @@ assert_eq!(arena.func_name(&ar)?, "pair");
 **Quick examples**
 
 ```rust
-let mut ar = Arena::new();
-let t = func!("foo"; 1, 2, 3 => &mut ar);
+let mut arena = Arena::new();
+let t = func!("foo"; 1, 2, 3 => &mut arena);
 
-match t.view(&ar)? {
-    View::Func(ar2, functor, args) => {
+match t.view(&arena)? {
+    View::Func(ar, functor, args) => {
         // functor is now `&Term` (atom), not `&str`
         assert_eq!(ar.atom_name(functor)?, "foo");
         assert_eq!(args.len(), 3);
@@ -55,6 +37,9 @@ match t.view(&ar)? {
 - `Term::func_name(&Arena) -> Result<&str, TermError>` to fetch a functor’s name directly.
 - `Term::atom_name(&Arena)` and `Term::var_name(&Arena)` helpers for retrieving atom/variable names without using `unpack_*`.
 - `Arena::func_name(&self, &Term) -> Result<&str, TermError>` for functor name lookup via the arena.
+* `Term` now implements `PartialOrd`.  **Note:** the `PartialEq` and `PartialOrd` implementations operate at the **handle level**, not at the **value level**.
+  This means two different `Term` handles can point to the same logical value, but still compare as unequal. Likewise, ordering reflects handle identity, not term value semantics.
+
 
 ### Display & pretty-printing
 
@@ -82,8 +67,8 @@ println!("{}", t.display(&arena));  // greet("world", 42)
   * After:
 
     ```rust
-    if let View::Func(_, functor, args) = t.view(&arena)? {
-        assert_eq!(arena.atom_name(functor)?, "foo");
+    if let View::Func(ar, functor, args) = t.view(&arena)? {
+        assert_eq!(ar.atom_name(functor)?, "foo");
     }
     ```
 
