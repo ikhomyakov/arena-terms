@@ -2149,7 +2149,7 @@ impl<'a> fmt::Display for TermDisplay<'a> {
                     write!(f, "{}", r)
                 }
             }
-            View::Date(epoch) => write!(f, "date({})", epoch_to_date_string(epoch, None)),
+            View::Date(epoch) => write!(f, "date{{{}}}", epoch_to_date_string(epoch, None)),
             View::Str(s) => write_str_quoted(f, s),
             View::Bin(bytes) => {
                 write!(f, "hex{{")?;
@@ -2273,7 +2273,7 @@ mod tests {
         let s = format!("{}", p.display(&arena));
         assert_eq!(
             s,
-            "foo(nil, unit, point(1, 2.0, date(1970-01-01T00:00:01+00:00), hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), point(1, 2.0, date(1970-01-01T00:00:01+00:00), hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), nil, [1, 2.0 | date(1970-01-01T00:00:01+00:00)])"
+            "foo(nil, unit, point(1, 2.0, date{1970-01-01T00:00:01+00:00}, hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), point(1, 2.0, date{1970-01-01T00:00:01+00:00}, hello, Hello, \"A str\\ning. Longer string.\", [hello, Hello, \"A str\\ning. Longer string.\"], (\"A str\\ning. Longer string.\", \"A str\\ning. Longer string.\")), nil, [1, 2.0 | date{1970-01-01T00:00:01+00:00}])"
         );
     }
 
@@ -2865,7 +2865,7 @@ mod tests {
         let t = Term::date(0);
         assert_eq!(
             format!("{}", t.display(&arena)),
-            "date(1970-01-01T00:00:00+00:00)"
+            "date{1970-01-01T00:00:00+00:00}"
         );
     }
 
@@ -2875,7 +2875,7 @@ mod tests {
         let t = Term::date(1_234);
         assert_eq!(
             t.display(&arena).to_string(),
-            "date(1970-01-01T00:00:01.234+00:00)"
+            "date{1970-01-01T00:00:01.234+00:00}"
         );
     }
 
@@ -2885,7 +2885,7 @@ mod tests {
         let t = Term::date(1_727_525_530_123i64);
         assert_eq!(
             format!("{}", t.display(&arena)),
-            "date(2024-09-28T12:12:10.123+00:00)"
+            "date{2024-09-28T12:12:10.123+00:00}"
         );
     }
 
@@ -2895,7 +2895,7 @@ mod tests {
         let t = Term::date(-5_382_698_399_999i64);
         assert_eq!(
             format!("{}", t.display(&arena)),
-            "date(1799-06-06T06:00:00.001+00:00)"
+            "date{1799-06-06T06:00:00.001+00:00}"
         );
     }
 
