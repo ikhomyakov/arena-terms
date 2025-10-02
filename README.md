@@ -1,18 +1,9 @@
 # Prolog‑like term library
 
-## License
-
-Copyright (c) 2005–2025 IKH Software, Inc.
-
-Released under the terms of the GNU Lesser General Public License, version 3.0
-or (at your option) any later version (LGPL-3.0-or-later).
-
-See [LICENSE.md](./LICENSE.md) for details.
-
-
-## Changelog
-
-See [CHANGELOG.md](./CHANGELOG.md).
+[![Crates.io](https://img.shields.io/crates/v/arena-terms.svg)](https://crates.io/crates/arena-terms)
+[![Documentation](https://docs.rs/arena-terms/badge.svg)](https://docs.rs/arena-terms)
+[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 
 ## Overview
@@ -503,4 +494,20 @@ This project is still evolving. The following limitations are known and may affe
   * **Implications:** Names that do not follow Prolog variable conventions may still be constructed.
   * **Printer behavior:** The printer outputs variable names verbatim without validation. This can produce invalid term strings that cannot be parsed back.
   * **Recommendation:** Avoid using arbitrary variable names — this will be **prohibited in future releases**. Always use names that follow the convention: `[A-Z_][A-Za-z0-9_]*`.
+
+
+## License
+
+Copyright (c) 2005–2025 IKH Software, Inc.
+
+Released under the terms of the GNU Lesser General Public License, version 3.0
+or (at your option) any later version (LGPL-3.0-or-later).
+
+See [LICENSE.md](./LICENSE.md) for details.
+
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
 

@@ -1,4 +1,4 @@
-//! Copyright (c) 2005–2025 IKH Software, Inc. <support@ikhsoftware.com>
+//! Copyright (c) 2005–2025 IKH Software, Inc.
 //!
 //! Released under the terms of the GNU Lesser General Public License, version 3.0
 //! or (at your option) any later version (LGPL-3.0-or-later).
@@ -56,6 +56,9 @@
 //! }
 //! ```
 //!
+//! # Crates.io
+//! Published at [crates.io/crates/arena-terms](https://crates.io/crates/arena-terms).
+
 
 use core::fmt;
 use smartstring::alias::String;
