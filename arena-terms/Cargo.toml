@@ -1,18 +1,19 @@
 [package]
 name = "arena-terms"
-authors = ["IKH Software, Inc. <support@ikhsoftware.com>"]
-version = "0.3.2"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
 keywords = ["prolog", "term", "arena", "immutable", "pattern-matching"]
 categories = ["data-structures", "memory-management"]
 description = "A lightweight, arena-backed representation of Prolog–like terms"
-license = "LGPL-3.0-or-later"
 readme = "README.md"
-repository = "https://github.com/ikhomyakov/arena-terms.git"
-rust-version = "1.89"
 
 [dependencies]
-chrono = "0.4.42"
-rand = "0.9.2"
-smartstring = "1.0.1"
+chrono.workspace = true
+rand.workspace = true
+smartstring.workspace = true
 

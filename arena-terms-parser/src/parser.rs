@@ -25,7 +25,6 @@ use crate::lexer::{TermLexer, TermToken, Value};
 use crate::oper::{Assoc, Fixity, MAX_OPER_PREC, MIN_OPER_PREC, OperDef, OperDefTab, OperDefs};
 use anyhow::{Context, Result, anyhow, bail};
 use arena_terms::{Arena, IntoTerm, Term, View, atom, func, list};
-use once_cell::sync::Lazy;
 use parlex::{Lexer, LexerCtx, LexerData, Token};
 use smartstring::alias::String;
 use std::iter::FusedIterator;
