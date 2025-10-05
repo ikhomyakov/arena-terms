@@ -49,7 +49,7 @@ if let Ok(View::Func(_, name, args)) = term.view(&arena) {
 
 ```toml
 [dependencies]
-arena-terms = "0.1"
+arena-terms = "0.3"
 ```
 
 See the [crate documentation](https://docs.rs/arena-terms) for full API details.
@@ -96,7 +96,7 @@ fn main() {
 
 ```toml
 [dependencies]
-arena-terms-parser = "0.1"
+arena-terms-parser = "0.3"
 arena-terms = "0.3"
 ```
 

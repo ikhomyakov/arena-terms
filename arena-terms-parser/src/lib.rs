@@ -1,8 +1,3 @@
-//! Copyright (c) 2005–2025 IKH Software, Inc.
-//!
-//! Released under the terms of the GNU Lesser General Public License, version 3.0,
-//! or (at your option) any later version (LGPL-3.0-or-later).
-//!
 //! # Arena Terms Parser
 //!
 //! Parser for arena-backed Prolog-like terms.
@@ -30,8 +25,19 @@
 //! - [`parlex`]: Core support library for lexing and parsing.
 //! - [`parlex-gen`]: Code generation utilities for **Alex** and **ASLR**.
 //!
-//! # Crates.io
-//! Available on [crates.io](https://crates.io/crates/arena-terms-parser).
+//! ## License
+//!
+//! Copyright (c) 2005–2025 IKH Software, Inc.
+//!
+//! Released under the terms of the GNU Lesser General Public License, version 3.0 or
+//! (at your option) any later version (LGPL-3.0-or-later).
+//!
+//! ## See Also
+//!
+//! - [arena-terms](https://crates.io/crates/arena-terms) — arena backed terms library
+//! - [parlex](https://crates.io/crates/parlex) — lexer and parser generators core support library
+//! - [parlex-gen](https://crates.io/crates/parlex-gen) — lexer and parser generators ALEX and ASLR
+
 pub mod lexer;
 pub mod oper;
 pub mod parser;

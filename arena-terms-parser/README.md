@@ -35,14 +35,14 @@ Add this crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-arena-terms-parser = "0.1"
+arena-terms-parser = "0.3"
 ````
 
 Also add:
 
 ```toml
 [dependencies]
-arena_terms = "0.1"
+arena_terms = "0.3"
 parlex = "0.1"
 ```
 
