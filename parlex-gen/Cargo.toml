@@ -1,0 +1,46 @@
+[package]
+name = "parlex-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+description = "Lexer generator ALEX and parser generator ASLR"
+readme = "README.md"
+
+[lib]
+name = "parlex_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aslr"
+path = "src/bin/aslr.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "alex"
+path = "src/bin/alex.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["clap"]
+
+[dependencies]
+anyhow.workspace = true
+regex-automata.workspace = true
+regex-syntax.workspace = true
+smartstring.workspace = true
+env_logger.workspace = true
+hex.workspace = true
+log.workspace = true
+parlex.workspace = true
+clap = { workspace = true, optional = true }
+logos.workspace = true
+chumsky.workspace = true
+once_cell.workspace = true
+regex.workspace = true

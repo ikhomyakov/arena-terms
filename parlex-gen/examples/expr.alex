@@ -1,0 +1,11 @@
+SPACE = [ \t\f]
+NEW_LINE = \r?\n
+OPER = [+-*/]
+CONST = [0-9]*
+
+Comment: <Expr> %.*
+Space: <Expr> {{SPACE}}
+NewLine: <Expr, Comment> {{NEW_LINE}}
+LeftParen: <Expr> \(
+RightParen: <Expr> \)
+

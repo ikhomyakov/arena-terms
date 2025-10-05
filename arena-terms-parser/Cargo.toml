@@ -1,0 +1,45 @@
+[package]
+name = "arena-terms-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+
+keywords = ["parser", "term", "arena", "pattern-matching", "prolog"]
+description = "Parser for arena-backed, lightweight representations of Prolog-like terms"
+readme = "README.md"
+
+build = "build.rs"
+
+[lib]
+name = "arena_terms_parser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "arena-terms-parser"
+path = "src/bin/arena_terms_parser.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["clap"]
+
+[dependencies]
+anyhow.workspace = true
+smartstring.workspace = true
+env_logger.workspace = true
+hex.workspace = true
+log.workspace = true
+parlex.workspace = true
+clap = { workspace = true, optional = true }
+arena-terms.workspace = true
+indexmap.workspace = true
+chrono.workspace = true
+once_cell.workspace = true
+include_bytes_aligned.workspace = true
+
+[build-dependencies]
+parlex-gen.workspace = true

@@ -1,0 +1,159 @@
+DEC = [0-9]
+HEX = [0-9a-fA-F]
+OCT = [0-7]
+LOWER = [a-z]
+UPPER = [A-Z_]
+OPSYM = [-~@#$^&*+=<>:.?/!;]
+
+EXP = (?:[eE][+-]?{{DEC}}+)
+SPACE = [ \t\f]
+ATOM = (?:{{LOWER}}(?:{{LOWER}}|{{UPPER}}|{{DEC}})*)|{{OPSYM}}+
+VAR = {{UPPER}}(?:{{LOWER}}|{{UPPER}}|{{DEC}})*
+HEX_CONST = 0x{{HEX}}*
+OCT_CONST = 0{{OCT}}*
+DEC_CONST = [1-9]{{DEC}}*
+FP_CONST = ((?:(?:{{DEC}}+\.{{DEC}}*|{{DEC}}*\.{{DEC}}+){{EXP}}?)|(?:{{DEC}}+{{EXP}}))
+LABEL = {{LOWER}}(?:{{LOWER}}|{{UPPER}}|{{DEC}})*
+NEW_LINE = \r?\n
+
+MMM = jan|Jan|JAN|feb|Feb|FEB|mar|Mar|MAR|apr|Apr|APR|may|May|MAY|jun|Jun|JUN|jul|Jul|JUL|aug|Aug|AUG|sep|Sep|SEP|oct|Oct|OCT|nov|Nov|NOV|dec|Dec|DEC
+DD = (?:0[1-9])|(?:[12][0-9])|(?:3[01])
+MM = (?:0[1-9])|(?:1[0-2])
+YYYY = [0-9]{4}
+HH = (?:[01][0-9])|(?:2[0-3])
+HA = (?:0[0-9])|(?:1[0-2])
+MI = [0-5][0-9]
+SS = [0-5][0-9](?:[.][0-9]+)?
+AMPM = AM|PM|am|pm
+
+DATE1 = {{YYYY}}-{{MM}}-{{DD}}
+DATE2 = {{MM}}/{{DD}}/{{YYYY}}
+DATE3 = {{DD}}-{{MMM}}-{{YYYY}}
+TIME1 = T{{HH}}:{{MI}}:{{SS}}
+TIME2 = T{{HH}}:{{MI}}
+TIME3 = [ ]+{{HH}}:{{MI}}:{{SS}}
+TIME4 = [ ]+{{HH}}:{{MI}}
+TIME5 = [ ]+{{HA}}:{{MI}}:{{SS}} {{AMPM}}
+TIME6 = [ ]+{{HA}}:{{MI}} {{AMPM}}
+ZONE1 = [ ]*Z
+ZONE2 = [ ]*?[+-](?:0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]
+
+
+LineComment: <Expr> %.*
+CommentStart: <Expr, Comment> /\*
+CommentEnd: <Comment> \*/
+CommentChar: <Comment> [^*\r\n]
+ExprSpace: <Expr> {{SPACE}}
+ExprNewLine: <Expr> {{NEW_LINE}}
+CommentNewLine: <Comment> {{NEW_LINE}}
+CommentAnyChar: <Comment> .
+LeftParen: <Expr> \(
+RightParen: <Expr> \)
+LeftBrack: <Expr> \[
+RightBrack: <Expr> \]
+Comma: <Expr> ,
+Pipe: <Expr> \|
+RightBrace: <Expr> \}
+Func: <Expr> {{ATOM}}\(
+Var: <Expr> {{VAR}}
+Atom: <Expr> {{ATOM}}
+
+Date: <Expr> date\{{{SPACE}}*
+DateEpoch: <Expr> date\{{{SPACE}}*-?{{DEC_CONST}}{{SPACE}}*\}
+Date1: <Date> {{DATE1}}
+Date2: <Date> {{DATE2}}
+Date3: <Date> {{DATE3}}
+TimeRightBrace: <Time> {{SPACE}}*\}
+Time1: <Time> {{TIME1}}
+Time2: <Time> {{TIME2}}
+Time3: <Time> {{TIME3}}
+Time4: <Time> {{TIME4}}
+Time5: <Time> {{TIME5}}
+Time6: <Time> {{TIME6}}
+ZoneRightBrace: <Zone> {{SPACE}}*\}
+Zone1: <Time, Zone> {{ZONE1}}{{SPACE}}*\}
+Zone2: <Time, Zone> {{ZONE2}}{{SPACE}}*\}
+
+Hex: <Expr> hex\{
+HexSpace: <Hex> {{SPACE}}
+HexNewLine: <Hex> {{NEW_LINE}}
+HexByte: <Hex> {{HEX}}{{HEX}}
+HexRightBrace: <Hex> \}
+Bin: <Expr> bin\{
+BinSpace: <Bin> {{SPACE}}
+BinNewLine: <Bin> {{NEW_LINE}}
+BinCount: <Bin> {{DEC_CONST}}(?::|{{NEW_LINE}})
+BinCountNLChar: <BinCount> \n
+BinCountAnyChar: <BinCount> .
+BinRightBrace: <Bin> \}
+BinLabelStart: <Bin> {{LABEL}}(?::|{{NEW_LINE}})
+BinLabelEnd: <BinLabel> (?::|{{NEW_LINE}}){{LABEL}}
+BinLabelNLChar: <BinLabel> \n
+BinLabelAnyChar: <BinLabel> .
+LeftBrace: <Expr> \{
+ScriptNotBraces: <Script> [^{}]+
+ScriptLeftBrace: <Script> \{
+ScriptRightBrace: <Script> \}
+ScriptNewLine: <Script> {{NEW_LINE}}
+Text: <Expr> text\{
+TextSpace: <Text> {{SPACE}}
+TextNewLine: <Text> {{NEW_LINE}}
+TextCount: <Text> {{DEC_CONST}}(?::|{{NEW_LINE}})
+TextCountAnyChar: <TextCount> .
+TextCountNewLine: <TextCount> {{NEW_LINE}}
+TextRightBrace: <Text> \}
+TextLabelStart: <Text> {{LABEL}}(?::|{{NEW_LINE}})
+TextLabelEnd: <TextLabel> (?::|{{NEW_LINE}}){{LABEL}}
+TextLabelNewLine: <TextLabel> {{NEW_LINE}}
+TextLabelAnyChar: <TextLabel> .
+HexConst: <Expr> {{HEX_CONST}}
+BaseConst: <Expr> (?:[2-9]|[1-2][0-9]|3[0-6])'[0-9a-zA-Z]+
+CharHex: <Expr> 0'\\x{{HEX}}{{HEX}}
+CharOct: <Expr> 0'\\{{OCT}}{1,3}
+CharNewLine1: <Expr> 0'\n
+CharNewLine2: <Expr> 0'\r\n
+CharNotBackslash: <Expr> 0'[^\\]
+CharCtrl: <Expr> 0'\\\^[A-Z\@]
+CharDel1: <Expr> 0'\\d
+CharDel2: <Expr> 0'\\\^\?
+CharEsc: <Expr> 0'\\e
+CharBell: <Expr> 0'\\a
+CharBackspace: <Expr> 0'\\b
+CharFormFeed: <Expr> 0'\\f
+CharNewLine3: <Expr> 0'\\n
+CharCarriageReturn: <Expr> 0'\\r
+CharTab: <Expr> 0'\\t
+CharVerticalTab: <Expr> 0'\\v
+CharAny: <Expr> 0'\\.
+CharNewLine4: <Expr> 0'\\\n
+OctConst: <Expr> {{OCT_CONST}}
+DecConst: <Expr> {{DEC_CONST}}
+FPConst: <Expr> {{FP_CONST}}
+DoubleQuote: <Expr> "
+SingleQuote: <Expr> '
+StrAtomCharHex: <Str,Atom> \\x{{HEX}}{{HEX}}
+StrAtomCharOct: <Str, Atom> \\{{OCT}}{1,3}
+StrAtomCharCtrl: <Str, Atom> \\\^[A-Z\@]
+StrAtomCharDel1: <Str, Atom> \\d
+StrAtomCharDel2: <Str, Atom> \\\^\?
+StrAtomCharEsc: <Str, Atom> \\e
+StrAtomCharBell: <Str, Atom> \\a
+StrAtomCharBackspace: <Str, Atom> \\b
+StrAtomCharFormFeed: <Str, Atom> \\f
+StrAtomCharNewLine: <Str, Atom> \\n
+StrAtomCharCarriageReturn: <Str, Atom> \\r
+StrAtomCharTab: <Str, Atom> \\t
+StrAtomVerticalTab: <Str, Atom> \\v
+StrAtomCharSkipNewLine: <Str, Atom> \\{{NEW_LINE}}
+StrAtomCharAny: <Str, Atom> \\.
+StrAtomCharBackslash: <Str, Atom> \\\\
+StrChar: <Str> [^\\"{\r\n]
+AtomChar: <Atom> [^\\'{\r\n]
+StrAtomCarriageReturn: <Str, Atom> \r
+StrDoubleQuote: <Str> "
+AtomSingleQuote: <Atom> '
+AtomLeftParen: <Atom> '\(
+AtomLeftBrace: <Atom> \{
+StrLeftBrace: <Str> \{
+StrAtomNewLine: <Str, Atom> {{NEW_LINE}}
+Error: <*> .
