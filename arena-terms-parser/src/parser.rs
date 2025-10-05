@@ -125,7 +125,7 @@ pub fn parser_oper_defs(arena: &mut Arena) -> OperDefs {
 /// Prolog-like term parser with operator precedence and associativity handling.
 ///
 /// The [`TermParser`] drives the parsing of Prolog-style terms using the
-/// [`parlex`] SLR(1) runtime library. It builds upon the [`TermLexer`] for tokenization
+/// [`parlex`] SLR(1) core library. It builds upon the [`TermLexer`] for tokenization
 /// and produces [`Term`] values stored in an [`Arena`] for efficient allocation.
 ///
 /// Operator definitions are resolved dynamically through an [`OperDefs`] table,
@@ -158,7 +158,7 @@ where
     /// The parser context that manages parse state, tables, and token input.
     ///
     /// This field wraps the generated `ParserData` and integrates the lexer
-    /// with the runtime parser loop from [`parlex`]. It drives token reading,
+    /// with the parser loop from [`parlex`]. It drives token reading,
     /// state transitions, and reductions.
     ctx: ParserCtx<TermLexer<I>, <Self as Parser<Arena>>::ParserData, Arena>,
 
@@ -177,7 +177,7 @@ where
 /// parser instance, collect or stream parsed [`Term`] values, dynamically
 /// extend operator definitions, and normalize parsed terms.
 ///
-/// The parser integrates with the [`parlex`] runtime library and operates over
+/// The parser integrates with the [`parlex`] core library and operates over
 /// tokens produced by the [`TermLexer`], yielding arena-allocated [`Term`]
 /// values suitable for further semantic processing.
 ///
@@ -259,7 +259,7 @@ where
     /// `op/6` term list read from a separate input source.
     ///
     /// This allows dynamic addition of new operator fixities and precedence
-    /// rules during runtime parsing.
+    /// rules during parsing.
     ///
     /// # Parameters
     /// - `arena`: Arena allocator used for constructing term structures.
@@ -434,7 +434,7 @@ where
     }
 }
 
-/// Implements the [`Parser`] trait for [`TermParser`], integrating with the **parlex** runtime library.
+/// Implements the [`Parser`] trait for [`TermParser`], integrating with the **parlex** core library.
 ///
 /// This binding connects the generated SLR parser tables (`ParData`) with the concrete
 /// term parser. It exposes the parser context, statistics, and the key callbacks

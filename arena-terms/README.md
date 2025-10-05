@@ -18,7 +18,7 @@ Copying or moving a `Term` is cheap: only the handle lives on the stack, while l
 Users interact with the library through three main types:
 
 * **\[`Term`]** – a 16‑byte handle identifying a value.  Values may be integers, floats, dates, atoms, variables, UTF‑8 strings, binary blobs or compound structures (functions, lists, tuples).  This handle implements `Copy`, `Clone`, `PartialEq` and does **not** directly borrow from the arena.
-* **\[`Arena`]** – an allocator that interns names and sequence data.  Every `Term` referencing interned data stores the arena’s ID so that an attempt to view a term with the wrong arena fails at runtime.
+* **\[`Arena`]** – an allocator that interns term data.  Every `Term` referencing interned data stores the arena’s ID so that an attempt to view a term with the wrong arena fails at runtime.
 * **\[`View<'a>`]** – a borrowed representation obtained via `Term::view(&Arena)` or `Arena::view(&Term)`.  A `View` decodes inline data or dereferences indices back into the arena.  It supports pattern‑matching and ordering according to Prolog’s standard term order. Obtaining a view does not allocate: it either returns references to inlined bytes or slices borrowed from the arena.
 
 The crate also provides a trait \[`IntoTerm`] for automatic conversion of many Rust types into `Term` values, and a suite of macros (`list!`, `tuple!`, `func!`, `atom!`, `var!`, `date!`, `unit!`, `nil!`) that make constructing compound terms ergonomic.  The following sections describe each component in detail and illustrate typical usage.

@@ -10,7 +10,7 @@ Parser for **arena-backed, Prolog-like terms**.
 This crate provides a lexer, parser, and operator handling for Prolog-style
 terms. It depends on the [`arena_terms`](https://crates.io/crates/arena_terms)
 crate to store terms efficiently in an arena and is built on top of the
-[`parlex`](https://crates.io/crates/parlex) runtime library.
+[`parlex`](https://crates.io/crates/parlex) core library.
 
 
 ## Features
@@ -107,7 +107,7 @@ Released under the terms of the GNU Lesser General Public License, version 3.0 o
 
 ## See Also
 
-- [parlex](https://crates.io/crates/parlex) - Parlex core runtime library
+- [parlex](https://crates.io/crates/parlex) - Parlex core core library
 - [parlex-gen](https://crates.io/crates/parlex-gen) - Lexer and parser generation tools (`alex` and `aslr`)
 - [arena-terms](https://crates.io/crates/arena-terms) - Arena-backed Prolog-like terms
 

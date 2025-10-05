@@ -45,7 +45,7 @@ use std::mem;
 /// build time by the project’s `build.rs` script.
 include!(concat!(env!("OUT_DIR"), "/lexer_data.rs"));
 
-/// Represents a generic runtime value emitted or used by the lexer.
+/// Represents a generic value emitted by the lexer.
 ///
 /// [`Value`] encapsulates auxiliary data produced during lexing, such as parsed
 /// terms or index into parser's terms stack.
@@ -150,7 +150,7 @@ impl TermToken {
 }
 
 /// Implements the [`Token`] trait for [`TermToken`], allowing integration
-/// with the `parlex` runtime parser library.
+/// with the `parlex` core library.
 ///
 /// This provides access to token identifiers and source line tracking.
 impl Token for TermToken {
@@ -241,7 +241,7 @@ where
     /// The internal lexer execution context that manages DFA traversal,
     /// input buffering, token emission, and line tracking.
     ///
-    /// This field implements [`LexerCtx`] from the **parlex** runtime library,
+    /// This field implements [`LexerCtx`] from the **parlex** core library,
     /// providing the core state and control required for integrating this lexer
     /// with the **parlex** framework.
     ctx: LexerCtx<I, <Self as Lexer<Arena>>::LexerData, <Self as Lexer<Arena>>::Token>,
@@ -377,7 +377,7 @@ where
     }
 }
 
-/// Implements the [`Lexer`] trait for [`TermLexer`], integrating with the **parlex** runtime.
+/// Implements the [`Lexer`] trait for [`TermLexer`], integrating with the **parlex** core library.
 ///
 /// This binding wires the generated DFA / rule set (`LexData`) to the concrete
 /// term-lexing behavior provided by `TermLexer`. It exposes the lexer context
