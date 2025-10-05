@@ -52,21 +52,29 @@ parlex = "0.1"
 Parsing a string into arena terms:
 
 ```rust
-use arena_terms_parser::parser::parse_term;
 use arena_terms::Arena;
+use arena_terms_parser::parser::TermParser;
+
+const DEFS: &str = "[
+    op('+'(x,y), infix, 380, left),
+    op('*'(x,y), infix, 400, left),
+]";
+
+const TERMS: &str = "
+    likes(mary, pizza).
+    2 + 2 * 3 = 8 .
+";
 
 fn main() {
     let mut arena = Arena::new();
 
-    let mut parser = TermParser::try_new(b"likes(mary, pizza).".fuse(), None).unwrap();
+    let mut parser = TermParser::try_new(TERMS.bytes().fuse(), None).unwrap();
 
-    if let Some(defs) = defs {
-        parser.define_opers(arena, b"[op('+'(x,y), infix, 380, left)]".fuse(), None)?;
+    parser.define_opers(&mut arena, DEFS.bytes().fuse(), None).unwrap();
+
+    while let Some(term) = parser.try_next_term(&mut arena).unwrap() {
+        println!("{}", term.display(&arena));
     }
-
-    let Some(term) = parser.try_next_term(&mut arena) else { unreachable!() }
-
-    println!("{}", term.display(&arena));
 }
 ```
 
@@ -88,7 +96,7 @@ Then run:
 
 ## Documentation
 
-For detailed API documentation, visit [docs.rs/parlex](https://docs.rs/parlex).
+For detailed API documentation, visit [docs.rs/arena-terms-parser](https://docs.rs/arena-terms-parser).
 
 
 ## License
