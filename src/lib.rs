@@ -3,6 +3,8 @@
 //! Released under the terms of the GNU Lesser General Public License, version 3.0
 //! or (at your option) any later version (LGPL-3.0-or-later).
 //!
+//! # Arena Terms
+//!
 //! A lightweight, arena-backed representation of Prolog–like terms.
 //!
 //! This crate provides a compact [`Term`] type for representing Prolog-like
