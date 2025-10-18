@@ -28,17 +28,17 @@ default = ["cli"]
 cli = ["clap"]
 
 [dependencies]
-anyhow.workspace = true
 smartstring.workspace = true
 env_logger.workspace = true
 hex.workspace = true
 log.workspace = true
 parlex.workspace = true
+try-next.workspace = true
 clap = { workspace = true, optional = true }
 arena-terms.workspace = true
-indexmap.workspace = true
 chrono.workspace = true
 include_bytes_aligned.workspace = true
+thiserror.workspace = true
 
 [build-dependencies]
 parlex-gen.workspace = true

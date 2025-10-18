@@ -84,29 +84,31 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "arena-terms"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "chrono",
+ "indexmap",
  "rand",
  "smartstring",
+ "thiserror",
 ]
 
 [[package]]
 name = "arena-terms-parser"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
- "anyhow",
  "arena-terms",
  "chrono",
  "clap",
  "env_logger",
  "hex",
  "include_bytes_aligned",
- "indexmap",
  "log",
  "parlex",
  "parlex-gen",
  "smartstring",
+ "thiserror",
+ "try-next",
 ]
 
 [[package]]
@@ -342,9 +344,9 @@ checksum = "4ee796ad498c8d9a1d68e477df8f754ed784ef875de1414ebdaf169f70a6a784"
 
 [[package]]
 name = "indexmap"
-version = "2.11.4"
+version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
+checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.0",
@@ -471,24 +473,21 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
 name = "parlex"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a7d052d18fb33e579f5b5290e2427eab9c880eb1dc082326a858bdd5f53738c"
+version = "0.3.0"
 dependencies = [
- "anyhow",
  "env_logger",
  "hex",
  "log",
  "regex-automata 0.4.11",
  "regex-syntax 0.8.6",
  "smartstring",
+ "thiserror",
+ "try-next",
 ]
 
 [[package]]
 name = "parlex-gen"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9beb1114a695b397bacc424bdfcb3acd4c270b0242ad471116252a6f9392bcd7"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chumsky",
@@ -740,6 +739,30 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "thiserror"
+version = "2.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "try-next"
+version = "0.4.0"
 
 [[package]]
 name = "unicode-ident"

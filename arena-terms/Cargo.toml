@@ -16,4 +16,5 @@ readme = "README.md"
 chrono.workspace = true
 rand.workspace = true
 smartstring.workspace = true
-
+indexmap.workspace = true
+thiserror.workspace = true
