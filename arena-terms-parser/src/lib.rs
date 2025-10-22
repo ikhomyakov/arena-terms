@@ -38,13 +38,11 @@
 //! - [parlex](https://crates.io/crates/parlex) — lexer and parser generators core support library
 //! - [parlex-gen](https://crates.io/crates/parlex-gen) — lexer and parser generators ALEX and ASLR
 
-mod error;
 mod lexer;
 mod parser;
 mod token;
 
-pub use error::TermParserError;
 pub use lexer::{TermLexer, TermLexerDriver};
 pub use parser::parser_data::TokenID;
-pub use parser::{TermParser, TermParserDriver};
+pub use parser::{TermParser, TermParser0, TermParserDriver};
 pub use token::{TermToken, Value};

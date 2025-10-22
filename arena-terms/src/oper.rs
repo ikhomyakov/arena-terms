@@ -518,7 +518,8 @@ impl Arena {
         }
 
         let tab = self
-            .opers.map
+            .opers
+            .map
             .entry(name.clone())
             .or_insert_with(OperDefTab::new);
 
@@ -577,9 +578,7 @@ impl Arena {
     /// malformed, or violates fixity/precedence/associativity constraints.
     pub fn define_opers(&mut self, term: Term) -> Result<(), TermError> {
         let ts = match term.view(self)? {
-            View::List(_, ts, _) => {
-                ts.to_vec()
-            }
+            View::List(_, ts, _) => ts.to_vec(),
             _ => {
                 vec![term]
             }
@@ -610,7 +609,7 @@ impl Arena {
     /// # Errors
     /// Returns an error if normalization fails due to invalid fixity, mismatched
     /// arity, or inconsistent operator metadata.
-    fn normalize_term(
+    pub fn normalize_term(
         &mut self,
         term: Term,
         fixity: Fixity,

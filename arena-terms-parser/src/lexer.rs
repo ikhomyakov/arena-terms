@@ -27,19 +27,15 @@
 //! [`OperDefs`]: crate::oper::OperDefs
 //! [`alex`]: https://crates.io/crates/parlex-gen
 
-use crate::{
-    Fixity, OperDef, OperDefs, TermParserError, TermToken, TokenID, Value, bail, lexer,
-    parser_error,
-};
+use crate::{TermToken, TokenID, Value};
 use lexer_data::{LexData, Mode, Rule};
-use parlex::{Lexer, LexerData, LexerDriver, LexerError};
+use parlex::{Lexer, LexerData, LexerDriver, LexerStats, ParlexError};
 use std::marker::PhantomData;
 use try_next::TryNextWithContext;
 
-use arena_terms::{Arena, Term};
+use arena_terms::{Arena, Fixity, OperDef, Term};
 use chrono::{DateTime, FixedOffset, Utc};
 use smartstring::alias::String;
-use std::io::Read;
 
 /// Includes the generated lexer definition produced by **`parlex-gen`**’s
 /// [`alex`](https://crates.io/crates/parlex-gen) tool.
@@ -74,10 +70,12 @@ pub mod lexer_data {
 /// Returns an error if the input cannot be parsed according to the expected format.
 ///
 /// [`chrono::DateTime::parse_from_str`]: chrono::DateTime::parse_from_str
-fn parse_date_to_epoch(s: &str, fmt: Option<&str>) -> Result<i64, TermParserError> {
+fn parse_date_to_epoch(s: &str, fmt: Option<&str>) -> Result<i64, ParlexError> {
     let dt_fixed: DateTime<FixedOffset> = match fmt {
-        None => DateTime::parse_from_rfc3339(s)?,
-        Some(layout) => DateTime::parse_from_str(s, layout)?,
+        None => DateTime::parse_from_rfc3339(s).map_err(|e| ParlexError::from_err(e, None))?,
+        Some(layout) => {
+            DateTime::parse_from_str(s, layout).map_err(|e| ParlexError::from_err(e, None))?
+        }
     };
     let dt_utc = dt_fixed.with_timezone(&Utc);
     Ok(dt_utc.timestamp_millis())
@@ -139,10 +137,6 @@ pub struct TermLexerDriver<I> {
     /// Secondary buffer
     pub buffer2: Vec<u8>,
 
-    /// The operator definition table used to resolve operator fixity,
-    /// precedence, and associativity during lexing.
-    pub opers: OperDefs,
-
     /// Nesting depth of parentheses `(...)` in the input.
     nest_count: isize,
 
@@ -167,139 +161,96 @@ pub struct TermLexerDriver<I> {
     date_format: String,
 }
 
-/// Internal helper macros that emits a token with a given configuration.
-///
-/// Assumes a variable named `lexer` is in scope.
-macro_rules! yield_token {
-    // Case 1: without op_tab_index
-    ($token_id:expr, $value:expr) => {
-        lexer.yield_token(TermToken {
-            token_id: $token_id,
-            value: $value,
-            line_no: lexer.line_no(),
-            op_tab_index: None,
-        });
-    };
-    // Case 2: with op_tab_index
-    ($token_id:expr, $value:expr, $op_tab_index:expr) => {
-        lexer.yield_token(TermToken {
-            token_id: $token_id,
-            value: $value,
-            line_no: lexer.line_no(),
-            op_tab_index: $op_tab_index, // directly use Option<usize>
-        });
-    };
-}
-/// Emits a token with the specified ID and no attached value.
-///
-/// Typically used for punctuation or delimiters.
-macro_rules! yield_id {
-    ($token_id:expr) => {
-        yield_token!($token_id, Value::None);
-    };
+#[inline]
+fn yield_id<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>, token_id: TokenID)
+where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    lexer.yield_token(TermToken {
+        token_id,
+        value: Value::None,
+        span: Some(lexer.span()),
+        op_tab_index: None,
+    });
 }
 
-/// Emits a token carrying an arena-allocated [`Term`] as its value.
-///
-/// Used for atoms, numbers, compound terms, etc.
-macro_rules! yield_term {
-    ($token_id:expr, $term:expr) => {
-        yield_token!($token_id, Value::Term($term));
-    };
+#[inline]
+fn yield_term<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>, token_id: TokenID, term: Term)
+where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    lexer.yield_token(TermToken {
+        token_id,
+        value: Value::Term(term),
+        span: Some(lexer.span()),
+        op_tab_index: None,
+    });
 }
 
-/// Emits a token carrying an integer index as its value.
-///
-/// Used for term stack references.
-macro_rules! yield_index {
-    ($token_id:expr, $index:expr) => {
-        yield_token!($token_id, Value::Index($index));
-    };
+#[inline]
+fn yield_optab<I>(
+    lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>,
+    token_id: TokenID,
+    term: Term,
+    op_tab_index: Option<usize>,
+) where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    lexer.yield_token(TermToken {
+        token_id,
+        value: Value::Term(term),
+        span: Some(lexer.span()),
+        op_tab_index,
+    });
 }
 
-/// Emits a token that includes both a term and an optional operator-table index.
-///
-/// Used for operator tokens.
-macro_rules! yield_optab {
-    ($token_id:expr, $term:expr, $op_tab_index:expr) => {
-        yield_token!($token_id, Value::Term($term), $op_tab_index);
-    };
+#[inline]
+fn take_bytes<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>) -> Vec<u8>
+where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    lexer.accum_flag = false;
+    ::core::mem::take(&mut lexer.buffer)
 }
 
-/// Clears the current lexer buffer and resets the accum flag.
-///
-/// Assumes a `lexer` variable is in scope.
-macro_rules! clear {
-    () => {
-        lexer.clear();
-    };
+#[inline]
+fn take_str<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>) -> Result<String, ParlexError>
+where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    lexer.accum_flag = false;
+    let bytes = take_bytes(lexer);
+    let s = ::std::string::String::from_utf8(bytes)
+        .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+    Ok(String::from(s))
 }
 
-/// Switches on the accum flag.
-///
-/// Assumes a `lexer` variable is in scope.
-macro_rules! accum {
-    () => {
-        lexer.accum();
-    };
-}
-
-/// Switches the lexer into a new parsing mode.
-///
-/// Assumes a `lexer` variable is in scope.
-macro_rules! begin {
-    ($mode:expr) => {
-        lexer.begin($mode);
-    };
-}
-
-/// Takes accumulated bytes from the secondary buffer.
-///
-/// Assumes `lexer` and `self` are in scope.
-macro_rules! take_bytes2 {
-    () => {{
+impl<I> TermLexerDriver<I> {
+    #[inline]
+    fn take_bytes2(&mut self, lexer: &mut Lexer<I, Self, Arena>) -> Vec<u8>
+    where
+        I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+    {
         lexer.accum_flag = false;
-        ::core::mem::take(&mut self.buffer2)
-    }};
-}
+        std::mem::take(&mut self.buffer2)
+    }
 
-/// Takes accumulated bytes from the secondary buffer and converts them into a UTF-8 [`SmartString`].
-///
-/// Assumes `lexer` and `self` are in scope.
-macro_rules! take_str2 {
-    () => {{
+    #[inline]
+    fn take_str2(&mut self, lexer: &mut Lexer<I, Self, Arena>) -> Result<String, ParlexError>
+    where
+        I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+    {
         lexer.accum_flag = false;
-        let bytes = ::core::mem::take(&mut self.buffer2);
-        let s = ::std::string::String::from_utf8(bytes)?;
-        ::smartstring::SmartString::from(s)
-    }};
-}
-
-/// Takes accumulated bytes from the primary buffer.
-///
-/// Assumes `lexer` is in scope.
-macro_rules! take_bytes {
-    () => {{
-        lexer.accum_flag = false;
-        ::core::mem::take(&mut lexer.buffer)
-    }};
-}
-
-/// Takes accumulated bytes from the primary buffer and converts them into a UTF-8 [`SmartString`].
-///
-/// Assumes `lexer` is in scope.
-macro_rules! take_str {
-    () => {{
-        lexer.accum_flag = false;
-        let bytes = ::core::mem::take(&mut lexer.buffer);
-        let s = ::std::string::String::from_utf8(bytes)?;
-        ::smartstring::SmartString::from(s)
-    }};
+        let bytes = std::mem::take(&mut self.buffer2);
+        let s = std::string::String::from_utf8(bytes)
+            .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+        Ok(String::from(s))
+    }
 }
 
 impl<I> LexerDriver for TermLexerDriver<I>
 where
-    I: TryNextWithContext<Arena, Item = u8>,
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     /// Rule identifiers and metadata produced by the lexer generator.
     type LexerData = LexData;
@@ -309,9 +260,6 @@ where
 
     /// Concrete lexer type parameterized by input, driver and context.
     type Lexer = Lexer<I, Self, Self::Context>;
-
-    /// Unified error type returned by actions.
-    type Error = TermParserError;
 
     /// Externally supplied context available to actions (symbol table).
     type Context = Arena;
@@ -336,7 +284,7 @@ where
         lexer: &mut Self::Lexer,
         arena: &mut Self::Context,
         rule: <Self::LexerData as LexerData>::LexerRule,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ParlexError> {
         log::trace!(
             "ACTION begin: mode {:?}, rule {:?}, buf {:?}, buf2 {:?}, label {:?}, accum {}",
             lexer.mode(),
@@ -353,65 +301,63 @@ where
             Rule::LineComment => {}
             Rule::CommentStart => {
                 if self.comment_nest_count == 0 {
-                    begin!(Mode::Comment);
+                    lexer.begin(Mode::Comment);
                 }
                 self.comment_nest_count += 1;
             }
             Rule::CommentEnd => {
                 self.comment_nest_count -= 1;
                 if self.comment_nest_count == 0 {
-                    begin!(Mode::Expr);
+                    lexer.begin(Mode::Expr);
                 }
             }
             Rule::CommentChar | Rule::ExprSpace | Rule::CommentAnyChar => {}
             Rule::ExprNewLine | Rule::CommentNewLine => {
-                lexer.line_no += 1;
+                // New line
             }
             Rule::LeftParen => {
                 self.nest_count += 1;
-                yield_id!(TokenID::LeftParen);
+                yield_id(lexer, TokenID::LeftParen);
             }
             Rule::RightParen => {
                 self.nest_count -= 1;
-                yield_id!(TokenID::RightParen);
+                yield_id(lexer, TokenID::RightParen);
             }
             Rule::LeftBrack => {
                 self.nest_count += 1;
-                yield_id!(TokenID::LeftBrack);
+                yield_id(lexer, TokenID::LeftBrack);
             }
             Rule::RightBrack => {
                 self.nest_count -= 1;
-                yield_id!(TokenID::RightBrack);
+                yield_id(lexer, TokenID::RightBrack);
             }
             Rule::Comma => {
-                yield_id!(TokenID::Comma);
+                yield_id(lexer, TokenID::Comma);
             }
             Rule::Pipe => {
-                yield_id!(TokenID::Pipe);
+                yield_id(lexer, TokenID::Pipe);
             }
             Rule::RightBrace => {
                 self.nest_count -= 1;
                 self.curly_nest_count -= 1;
                 if self.curly_nest_count >= 0 {
-                    begin!(Mode::Str);
-                    yield_id!(TokenID::RightParen);
-                    let op_tab_idx = self.opers.lookup("++");
-                    yield_optab!(TokenID::AtomOper, arena.atom("++"), op_tab_idx);
-                    clear!();
-                    accum!();
+                    lexer.begin(Mode::Str);
+                    yield_id(lexer, TokenID::RightParen);
+                    let op_tab_idx = arena.lookup_oper("++");
+                    yield_optab(lexer, TokenID::AtomOper, arena.atom("++"), op_tab_idx);
+                    lexer.clear();
+                    lexer.accum();
                 } else {
-                    yield_term!(TokenID::Error, arena.str("}"));
+                    yield_term(lexer, TokenID::Error, arena.str("}"));
                 }
             }
             Rule::Func => {
                 self.nest_count += 1;
                 lexer.buffer.pop();
-                let s = take_str!();
-                let op_tab_idx = self.opers.lookup(&s);
-                let op_tab = self.opers.get(op_tab_idx);
-
-                let atom = arena.atom(s);
-
+                let s = take_str(lexer)?;
+                let atom = arena.atom(&s);
+                let op_tab_idx = arena.lookup_oper(&s);
+                let op_tab = arena.get_oper(op_tab_idx);
                 if op_tab.is_oper() {
                     let (has_empty, has_non_empty) =
                         [Fixity::Prefix, Fixity::Infix, Fixity::Postfix]
@@ -428,97 +374,103 @@ where
                     match (has_empty, has_non_empty) {
                         (false, false) => unreachable!(),
                         (true, false) => {
-                            yield_optab!(TokenID::AtomOper, atom, op_tab_idx);
-                            yield_id!(TokenID::LeftParen);
+                            yield_optab(lexer, TokenID::AtomOper, atom, op_tab_idx);
+                            yield_id(lexer, TokenID::LeftParen);
                         }
                         (false, true) => {
-                            yield_optab!(TokenID::FuncOper, atom, op_tab_idx);
+                            yield_optab(lexer, TokenID::FuncOper, atom, op_tab_idx);
                         }
-                        (true, true) => bail!("arguments conflict in op defs for {:?}", atom),
+                        (true, true) => {
+                            return Err(ParlexError {
+                                message: format!("arguments conflict in op defs for {:?}", atom),
+                                span: Some(lexer.span()),
+                            });
+                        }
                     }
                 } else {
-                    yield_optab!(TokenID::Func, atom, op_tab_idx);
+                    yield_optab(lexer, TokenID::Func, atom, op_tab_idx);
                 }
             }
             Rule::Var => {
-                let s = take_str!();
-                yield_term!(TokenID::Var, arena.var(s));
+                let s = take_str(lexer)?;
+                yield_term(lexer, TokenID::Var, arena.var(s));
             }
             Rule::Atom => {
                 if lexer.buffer == b"." && self.nest_count == 0 {
-                    yield_id!(TokenID::Dot);
-                    yield_id!(TokenID::End);
+                    yield_id(lexer, TokenID::Dot);
+                    yield_id(lexer, TokenID::End);
                 } else {
-                    let s = take_str!();
-                    let op_tab_idx = self.opers.lookup(&s);
-                    let op_tab = self.opers.get(op_tab_idx);
-                    let atom = arena.atom(s);
+                    let s = take_str(lexer)?;
+                    let atom = arena.atom(&s);
+                    let op_tab_idx = arena.lookup_oper(&s);
+                    let op_tab = arena.get_oper(op_tab_idx);
                     if op_tab.is_oper() {
-                        yield_optab!(TokenID::AtomOper, atom, op_tab_idx);
+                        yield_optab(lexer, TokenID::AtomOper, atom, op_tab_idx);
                     } else {
-                        yield_optab!(TokenID::Atom, atom, op_tab_idx);
+                        yield_optab(lexer, TokenID::Atom, atom, op_tab_idx);
                     }
                 }
             }
 
             Rule::DateEpoch => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.pop();
                 s.drain(0..5);
                 let s = s.trim();
-                let d = parse_i64(s, 10)?;
-                yield_term!(TokenID::Date, arena.date(d));
+                let d =
+                    parse_i64(s, 10).map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Date, arena.date(d));
             }
             Rule::Date => {
-                begin!(Mode::Date);
-                clear!();
+                lexer.begin(Mode::Date);
+                lexer.clear();
                 self.buffer2.clear();
                 self.date_format.clear();
             }
             Rule::Date1 => {
-                begin!(Mode::Time);
+                lexer.begin(Mode::Time);
                 self.date_format.push_str("%Y-%m-%d");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Date2 => {
-                begin!(Mode::Time);
+                lexer.begin(Mode::Time);
                 self.date_format.push_str("%m/%d/%Y");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Date3 => {
-                begin!(Mode::Time);
+                lexer.begin(Mode::Time);
                 self.date_format.push_str("%d-%b-%Y");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Time1 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str("T%H:%M:%S%.f");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Time2 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str("T%H:%M:%S");
                 self.buffer2.extend(&lexer.buffer);
                 self.buffer2.extend(b":00");
             }
             Rule::Time3 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str(" %H:%M:%S%.f");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Time4 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str(" %H:%M:%S");
                 self.buffer2.extend(&lexer.buffer);
                 self.buffer2.extend(b":00");
             }
             Rule::Time5 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str(" %I:%M:%S%.f %p");
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::Time6 => {
-                begin!(Mode::Zone);
+                lexer.begin(Mode::Zone);
                 self.date_format.push_str(" %I:%M:%S %p");
                 self.buffer2.extend(&lexer.buffer[..lexer.buffer.len() - 3]);
                 self.buffer2.extend(b":00");
@@ -529,144 +481,148 @@ where
                     self.date_format.push_str(" %H:%M:%S");
                     self.buffer2.extend(b" 00:00:00");
                 }
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 self.date_format.push_str("%:z");
                 self.buffer2.extend(b"+00:00");
-                let s = take_str2!();
+                let s = self.take_str2(lexer)?;
                 let d = parse_date_to_epoch(s.trim_end(), Some(self.date_format.as_str()))?;
-                yield_term!(TokenID::Date, arena.date(d));
+                yield_term(lexer, TokenID::Date, arena.date(d));
             }
             Rule::Zone2 => {
                 if lexer.mode() == Mode::Time {
                     self.date_format.push_str(" %H:%M:%S");
                     self.buffer2.extend(b" 00:00:00");
                 }
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 if lexer.buffer[0] == b' ' {
                     self.date_format.push(' ');
                 }
                 self.date_format.push_str("%:z");
                 lexer.buffer.pop();
                 self.buffer2.extend(&lexer.buffer);
-                let s = take_str2!();
+                let s = self.take_str2(lexer)?;
                 let d = parse_date_to_epoch(s.trim_end(), Some(self.date_format.as_str()))?;
-                yield_term!(TokenID::Date, arena.date(d));
+                yield_term(lexer, TokenID::Date, arena.date(d));
             }
             Rule::TimeRightBrace => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 self.date_format.push_str(" %H:%M:%S%:z");
                 self.buffer2.extend(b" 00:00:00+00:00");
-                let s = take_str2!();
+                let s = self.take_str2(lexer)?;
                 let d = parse_date_to_epoch(&s, Some(self.date_format.as_str()))?;
-                yield_term!(TokenID::Date, arena.date(d));
+                yield_term(lexer, TokenID::Date, arena.date(d));
             }
             Rule::ZoneRightBrace => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 self.date_format.push_str("%:z");
                 self.buffer2.extend(b"+00:00");
-                let s = take_str2!();
+                let s = self.take_str2(lexer)?;
                 let d = parse_date_to_epoch(&s, Some(self.date_format.as_str()))?;
-                yield_term!(TokenID::Date, arena.date(d));
+                yield_term(lexer, TokenID::Date, arena.date(d));
             }
 
             Rule::Hex => {
-                begin!(Mode::Hex);
+                lexer.begin(Mode::Hex);
                 self.buffer2.clear();
             }
             Rule::HexSpace => {}
             Rule::HexNewLine => {
-                lexer.line_no += 1;
+                // New line
             }
             Rule::HexByte => {
-                let s = str::from_utf8(&lexer.buffer)?;
+                let s = str::from_utf8(&lexer.buffer)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 match u8::from_str_radix(s, 16) {
                     Ok(b) => {
                         self.buffer2.push(b);
                     }
                     Err(_) => {
-                        yield_term!(TokenID::Error, arena.str(s));
+                        yield_term(lexer, TokenID::Error, arena.str(s));
                     }
                 }
             }
             Rule::HexRightBrace => {
                 lexer.buffer.pop();
-                let bytes = take_bytes2!();
-                yield_term!(TokenID::Bin, arena.bin(bytes));
-                begin!(Mode::Expr);
+                let bytes = self.take_bytes2(lexer);
+                yield_term(lexer, TokenID::Bin, arena.bin(bytes));
+                lexer.begin(Mode::Expr);
             }
             Rule::Bin => {
-                begin!(Mode::Bin);
+                lexer.begin(Mode::Bin);
             }
             Rule::Text => {
-                begin!(Mode::Text);
+                lexer.begin(Mode::Text);
             }
             Rule::BinSpace | Rule::TextSpace => {}
             Rule::BinNewLine | Rule::TextNewLine => {
-                lexer.line_no += 1;
+                // New line
             }
             r @ (Rule::BinCount | Rule::TextCount) => {
-                let s = str::from_utf8(&lexer.buffer)?;
+                let s = str::from_utf8(&lexer.buffer)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 let mut s = String::from(s.trim());
                 if &s[s.len() - 1..] == "\n" {
-                    lexer.line_no += 1;
+                    // New line
                 }
                 if &s[s.len() - 1..] == ":" {
                     s.pop();
                 }
-                self.bin_count = s.parse()?;
+                self.bin_count = s
+                    .parse()
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 if self.bin_count > 0 {
                     if r == Rule::BinCount {
-                        begin!(Mode::BinCount);
+                        lexer.begin(Mode::BinCount);
                     } else {
-                        begin!(Mode::TextCount);
+                        lexer.begin(Mode::TextCount);
                     }
-                    clear!();
-                    accum!();
+                    lexer.clear();
+                    lexer.accum();
                 }
             }
             r @ (Rule::BinCountAnyChar | Rule::TextCountAnyChar) => {
                 self.bin_count -= 1;
                 if self.bin_count == 0 {
                     self.buffer2.extend(&lexer.buffer);
-                    clear!();
+                    lexer.clear();
                     if r == Rule::BinCountAnyChar {
-                        begin!(Mode::Bin);
+                        lexer.begin(Mode::Bin);
                     } else {
-                        begin!(Mode::Text);
+                        lexer.begin(Mode::Text);
                     }
                 }
             }
             r @ (Rule::BinCountNLChar | Rule::TextCountNewLine) => {
-                lexer.line_no += 1;
+                // New line
                 if lexer.buffer[0] == b'\r' {
                     lexer.buffer.remove(0);
                 }
                 self.bin_count -= 1;
                 if self.bin_count == 0 {
                     self.buffer2.extend(&lexer.buffer);
-                    clear!();
+                    lexer.clear();
                     if r == Rule::BinCountNLChar {
-                        begin!(Mode::Bin);
+                        lexer.begin(Mode::Bin);
                     } else {
-                        begin!(Mode::Text);
+                        lexer.begin(Mode::Text);
                     }
                 }
             }
             r @ (Rule::BinRightBrace | Rule::TextRightBrace) => {
                 if r == Rule::BinRightBrace {
-                    let bytes = take_bytes2!();
-                    yield_term!(TokenID::Bin, arena.bin(bytes));
+                    let bytes = self.take_bytes2(lexer);
+                    yield_term(lexer, TokenID::Bin, arena.bin(bytes));
                 } else {
-                    let s = take_str2!();
-                    yield_term!(TokenID::Str, arena.str(s));
+                    let s = self.take_str2(lexer)?;
+                    yield_term(lexer, TokenID::Str, arena.str(s));
                 }
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
             }
             r @ (Rule::BinLabelStart | Rule::TextLabelStart) => {
                 self.bin_label.clear();
                 let len = lexer.buffer.len();
                 if lexer.buffer[len - 1] == b'\n' {
-                    lexer.line_no += 1;
+                    // New line
                     self.bin_label.push(b'\n');
                     lexer.buffer.pop();
                     let len = lexer.buffer.len();
@@ -685,20 +641,20 @@ where
                 self.bin_label.extend(buf);
 
                 if r == Rule::BinLabelStart {
-                    begin!(Mode::BinLabel);
+                    lexer.begin(Mode::BinLabel);
                 } else {
-                    begin!(Mode::TextLabel);
+                    lexer.begin(Mode::TextLabel);
                 }
             }
             r @ (Rule::BinLabelEnd | Rule::TextLabelEnd) => {
                 if lexer.buffer[0] != b':' {
-                    lexer.line_no += 1;
+                    // New line
                 }
                 if lexer.buffer == self.bin_label {
                     if r == Rule::BinLabelEnd {
-                        begin!(Mode::Bin);
+                        lexer.begin(Mode::Bin);
                     } else {
-                        begin!(Mode::Text);
+                        lexer.begin(Mode::Text);
                     }
                 } else {
                     if r == Rule::TextLabelEnd && lexer.buffer[0] == b'\r' {
@@ -708,7 +664,7 @@ where
                 }
             }
             r @ (Rule::BinLabelNLChar | Rule::TextLabelNewLine) => {
-                lexer.line_no += 1;
+                // New line
                 if r == Rule::TextLabelNewLine && lexer.buffer[0] == b'\r' {
                     lexer.buffer.remove(0);
                 }
@@ -718,9 +674,9 @@ where
                 self.buffer2.extend(&lexer.buffer);
             }
             Rule::LeftBrace => {
-                begin!(Mode::Script);
-                clear!();
-                accum!();
+                lexer.begin(Mode::Script);
+                lexer.clear();
+                lexer.accum();
             }
             Rule::ScriptNotBraces => {}
             Rule::ScriptLeftBrace => {
@@ -731,128 +687,159 @@ where
                     self.script_curly_nest_count -= 1;
                 } else {
                     lexer.buffer.pop();
-                    let s = take_str!();
-                    yield_term!(TokenID::Str, arena.str(s));
-                    begin!(Mode::Expr);
+                    let s = take_str(lexer)?;
+                    yield_term(lexer, TokenID::Str, arena.str(s));
+                    lexer.begin(Mode::Expr);
                 }
             }
             Rule::ScriptNewLine => {
-                lexer.line_no += 1;
+                // New line
             }
             Rule::HexConst => {
                 lexer.buffer.drain(0..2);
-                let s = take_str!();
-                let val = parse_i64(s.as_str(), 16)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                let s = take_str(lexer)?;
+                let val = parse_i64(s.as_str(), 16)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::BaseConst => {
-                let s = take_str!();
-                let (base_str, digits) = s
-                    .split_once('\'')
-                    .ok_or(parser_error!("missing ' separator"))?;
+                let s = take_str(lexer)?;
+                let (base_str, digits) = s.split_once('\'').ok_or(ParlexError {
+                    message: format!("missing `'` separator"),
+                    span: Some(lexer.span()),
+                })?;
                 let base: u32 = base_str
                     .parse()
-                    .map_err(|_| parser_error!("invalid base"))?;
-                let val = parse_i64(digits, base)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                let val = parse_i64(digits, base)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::CharHex => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.drain(0..4);
-                let val = parse_i64(s.as_str(), 16)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                let val = parse_i64(s.as_str(), 16)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::CharOct => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.drain(0..3);
-                let val = parse_i64(s.as_str(), 8)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                let val = parse_i64(s.as_str(), 8)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::CharNewLine1 | Rule::CharNewLine2 | Rule::CharNewLine4 => {
-                lexer.line_no += 1;
-                yield_term!(TokenID::Int, arena.int('\n' as i64));
+                // New line
+                yield_term(lexer, TokenID::Int, arena.int('\n' as i64));
             }
             Rule::CharNotBackslash => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.drain(0..2);
-                let val = s.chars().next().ok_or(parser_error!("invalid char"))? as i64;
-                yield_term!(TokenID::Int, arena.int(val));
+                let val = s.chars().next().ok_or(ParlexError {
+                    message: format!("invalid char"),
+                    span: Some(lexer.span()),
+                })? as i64;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::CharCtrl => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.drain(0..4);
-                let val =
-                    s.chars().next().ok_or(parser_error!("invalid char"))? as i64 - '@' as i64;
-                yield_term!(TokenID::Int, arena.int(val));
+                let val = s.chars().next().ok_or(ParlexError {
+                    message: format!("invalid char"),
+                    span: Some(lexer.span()),
+                })? as i64
+                    - '@' as i64;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::CharDel1 | Rule::CharDel2 => {
-                yield_term!(TokenID::Int, arena.int('\x7F' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\x7F' as i64));
             }
             Rule::CharEsc => {
-                yield_term!(TokenID::Int, arena.int('\x1B' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\x1B' as i64));
             }
             Rule::CharBell => {
-                yield_term!(TokenID::Int, arena.int('\u{0007}' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\u{0007}' as i64));
             }
             Rule::CharBackspace => {
-                yield_term!(TokenID::Int, arena.int('\u{0008}' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\u{0008}' as i64));
             }
             Rule::CharFormFeed => {
-                yield_term!(TokenID::Int, arena.int('\u{000C}' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\u{000C}' as i64));
             }
             Rule::CharNewLine3 => {
-                yield_term!(TokenID::Int, arena.int('\n' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\n' as i64));
             }
             Rule::CharCarriageReturn => {
-                yield_term!(TokenID::Int, arena.int('\r' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\r' as i64));
             }
             Rule::CharTab => {
-                yield_term!(TokenID::Int, arena.int('\t' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\t' as i64));
             }
             Rule::CharVerticalTab => {
-                yield_term!(TokenID::Int, arena.int('\u{000B}' as i64));
+                yield_term(lexer, TokenID::Int, arena.int('\u{000B}' as i64));
             }
             Rule::CharAny => {
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.drain(0..3);
-                let val = s.chars().next().ok_or(parser_error!("invalid char"))? as i64;
-                yield_term!(TokenID::Int, arena.int(val));
+                let val = s.chars().next().ok_or(ParlexError {
+                    message: format!("invalid char"),
+                    span: Some(lexer.span()),
+                })? as i64;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::OctConst => {
-                let s = take_str!();
-                let val = parse_i64(s.as_str(), 8)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                let s = take_str(lexer)?;
+                let val = parse_i64(s.as_str(), 8)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::DecConst => {
-                let s = take_str!();
-                let val = parse_i64(s.as_str(), 10)?;
-                yield_term!(TokenID::Int, arena.int(val));
+                let s = take_str(lexer)?;
+                let val = parse_i64(s.as_str(), 10)
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Int, arena.int(val));
             }
             Rule::FPConst => {
-                let s = take_str!();
-                let val: f64 = s.parse()?;
-                yield_term!(TokenID::Real, arena.real(val));
+                let s = take_str(lexer)?;
+                let val: f64 = s
+                    .parse()
+                    .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+                yield_term(lexer, TokenID::Real, arena.real(val));
             }
             Rule::DoubleQuote => {
-                begin!(Mode::Str);
-                clear!();
-                accum!();
+                lexer.begin(Mode::Str);
+                lexer.clear();
+                lexer.accum();
             }
             Rule::SingleQuote => {
-                begin!(Mode::Atom);
-                clear!();
-                accum!();
+                lexer.begin(Mode::Atom);
+                lexer.clear();
+                lexer.accum();
             }
             Rule::StrAtomCharHex => {
                 let len = lexer.buffer.len();
-                let b: u8 = parse_i64(str::from_utf8(&lexer.buffer[len - 2..])?, 16)?.try_into()?;
+                let b: u8 = parse_i64(
+                    str::from_utf8(&lexer.buffer[len - 2..])
+                        .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?,
+                    16,
+                )
+                .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?
+                .try_into()
+                .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 lexer.buffer.truncate(len - 4);
                 lexer.buffer.push(b);
             }
             Rule::StrAtomCharOct => {
                 let slash_pos = lexer.buffer.iter().rposition(|&b| b == b'\\').unwrap();
-                let b: u8 =
-                    parse_i64(str::from_utf8(&lexer.buffer[slash_pos + 1..])?, 8)?.try_into()?;
+                let b: u8 = parse_i64(
+                    str::from_utf8(&lexer.buffer[slash_pos + 1..])
+                        .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?,
+                    8,
+                )
+                .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?
+                .try_into()
+                .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 lexer.buffer.truncate(slash_pos);
                 lexer.buffer.push(b);
             }
@@ -913,7 +900,7 @@ where
                 lexer.buffer.push(b'\x0B');
             }
             Rule::StrAtomCharSkipNewLine => {
-                lexer.line_no += 1;
+                // New line
                 lexer.buffer.pop();
                 let idx = lexer.buffer.len() - 1;
                 if lexer.buffer[idx] == b'\r' {
@@ -927,48 +914,48 @@ where
             }
             Rule::StrChar | Rule::AtomChar | Rule::StrAtomCarriageReturn => {}
             Rule::StrDoubleQuote => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str!();
-                yield_term!(TokenID::Str, arena.str(s));
+                let s = take_str(lexer)?;
+                yield_term(lexer, TokenID::Str, arena.str(s));
             }
             Rule::AtomSingleQuote => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str!();
-                yield_term!(TokenID::Atom, arena.atom(s));
+                let s = take_str(lexer)?;
+                yield_term(lexer, TokenID::Atom, arena.atom(s));
             }
             Rule::AtomLeftParen => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 self.nest_count += 1;
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.truncate(s.len() - 2);
-                yield_term!(TokenID::Func, arena.atom(s));
+                yield_term(lexer, TokenID::Func, arena.atom(s));
             }
             Rule::AtomLeftBrace => {}
             Rule::StrLeftBrace => {
-                begin!(Mode::Expr);
+                lexer.begin(Mode::Expr);
                 self.nest_count += 1;
                 self.curly_nest_count += 1;
-                let mut s = take_str!();
+                let mut s = take_str(lexer)?;
                 s.pop();
-                yield_term!(TokenID::Str, arena.str(s));
-                let op_tab_idx = self.opers.lookup("++");
-                yield_optab!(TokenID::AtomOper, arena.atom("++"), op_tab_idx);
-                yield_id!(TokenID::LeftParen);
+                yield_term(lexer, TokenID::Str, arena.str(s));
+                let op_tab_idx = arena.lookup_oper("++");
+                yield_optab(lexer, TokenID::AtomOper, arena.atom("++"), op_tab_idx);
+                yield_id(lexer, TokenID::LeftParen);
             }
             Rule::StrAtomNewLine => {
-                lexer.line_no += 1;
+                // New line
             }
             Rule::Error => {
-                let s = take_str!();
-                yield_term!(TokenID::Error, arena.str(s));
+                let s = take_str(lexer)?;
+                yield_term(lexer, TokenID::Error, arena.str(s));
             }
             Rule::End => {
                 if lexer.mode() == Mode::Expr {
-                    yield_id!(TokenID::End);
+                    yield_id(lexer, TokenID::End);
                 } else {
-                    yield_term!(TokenID::Error, arena.str("<END>"));
+                    yield_term(lexer, TokenID::Error, arena.str("<END>"));
                 }
             }
         }
@@ -1038,7 +1025,7 @@ where
 /// [`alex`]: https://crates.io/crates/parlex-gen
 pub struct TermLexer<I>
 where
-    I: TryNextWithContext<Arena, Item = u8>,
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     /// The underlying DFA/engine that drives tokenization, parameterized by the
     /// input `I` and the driver that executes rule actions.
@@ -1047,7 +1034,7 @@ where
 
 impl<I> TermLexer<I>
 where
-    I: TryNextWithContext<Arena, Item = u8>,
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     /// # Parameters
     /// - `input`: The input byte stream to be lexed.
@@ -1074,9 +1061,6 @@ where
     ///
     /// # Parameters
     /// - `input`: The input byte stream to be lexed.
-    /// - `opers`: Optional operator definitions ([`OperDefs`]) used to
-    ///   recognize operator tokens by fixity and precedence.
-    ///   If `None`, an empty operator table is created.
     ///
     /// # Returns
     /// A ready-to-use [`TermLexer`] instance, or an error if the underlying
@@ -1085,22 +1069,9 @@ where
     /// # Errors
     /// Returns a [`LexerError`] if the lexer cannot be constructed from the
     /// given input and operatir table.
-    pub fn try_new(
-        input: I,
-        opers: Option<OperDefs>,
-    ) -> Result<
-        Self,
-        LexerError<
-            <I as TryNextWithContext<Arena>>::Error,
-            <TermLexerDriver<I> as LexerDriver>::Error,
-        >,
-    > {
+    pub fn try_new(input: I) -> Result<Self, ParlexError> {
         let driver = TermLexerDriver {
             _marker: PhantomData,
-            opers: match opers {
-                Some(opers) => opers,
-                None => OperDefs::new(),
-            },
             nest_count: 0,
             comment_nest_count: 0,
             curly_nest_count: 0,
@@ -1115,18 +1086,15 @@ where
     }
 }
 
-impl<I> TryNextWithContext<Arena> for TermLexer<I>
+impl<I> TryNextWithContext<Arena, LexerStats> for TermLexer<I>
 where
-    I: TryNextWithContext<Arena, Item = u8>,
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     /// Tokens produced by this lexer.
     type Item = TermToken;
 
     /// Unified error type.
-    type Error = LexerError<
-        <I as TryNextWithContext<Arena>>::Error,
-        <TermLexerDriver<I> as LexerDriver>::Error,
-    >;
+    type Error = ParlexError;
 
     /// Advances the lexer and returns the next token, or `None` at end of input.
     ///
@@ -1153,8 +1121,12 @@ where
     fn try_next_with_context(
         &mut self,
         context: &mut Arena,
-    ) -> Result<Option<TermToken>, <Self as TryNextWithContext<Arena>>::Error> {
+    ) -> Result<Option<TermToken>, ParlexError> {
         self.lexer.try_next_with_context(context)
+    }
+
+    fn stats(&self) -> LexerStats {
+        self.lexer.stats()
     }
 }
 
@@ -1162,14 +1134,14 @@ where
 #[cfg(test)]
 mod tests {
     use arena_terms::View;
+    use parlex::Token;
     use try_next::IterInput;
 
     use super::*;
 
     fn lex(arena: &mut Arena, s: &str) -> Vec<TermToken> {
         let input = IterInput::from(s.bytes());
-        let mut lexer =
-            TermLexer::try_new(input, Some(OperDefs::new())).expect("cannot create lexer");
+        let mut lexer = TermLexer::try_new(input).expect("cannot create lexer");
         lexer.try_collect_with_context(arena).expect("lexer error")
     }
 
@@ -1268,7 +1240,7 @@ mod tests {
         dbg!(&ts);
         assert!(ts.len() == 9);
         assert!(ts.iter().take(ts.len() - 1).all(|t| {
-            t.line_no == 2
+            t.span().unwrap().start.line == 1
                 && matches!(
                     Term::try_from(t.value.clone())
                         .unwrap()

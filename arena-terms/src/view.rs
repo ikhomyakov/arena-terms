@@ -377,7 +377,6 @@ fn numeric_value(t: &View) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Write;
 
     #[test]
     fn view_size_is_40_bytes() {

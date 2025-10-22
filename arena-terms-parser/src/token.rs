@@ -9,9 +9,9 @@
 //!
 //! These are produced by the lexer and consumed by the parser and later stages.
 
-use crate::{TermParserError, TokenID};
+use crate::TokenID;
 use arena_terms::Term;
-use parlex::Token;
+use parlex::{ParlexError, Span, Token};
 
 /// Represents a generic value emitted by the lexer.
 ///
@@ -21,7 +21,7 @@ use parlex::Token;
 /// # Variants
 /// - [`Value::None`] — Indicates absence of a value.
 /// - [`Value::Term`] — Wraps a parsed [`Term`] instance.
-/// - [`Value::Index`] — Holds a numeric index.
+/// - [`Value::Index`] — Holds a numeric index to terms stack `TermsParserDriver::terms`.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Value {
     #[default]
@@ -38,13 +38,13 @@ macro_rules! impl_tryfrom_value {
     ( $( $Variant:ident => $ty:ty ),+ $(,)? ) => {
         $(
             impl ::core::convert::TryFrom<Value> for $ty {
-                type Error = TermParserError;
-                fn try_from(v: Value) -> Result<Self, TermParserError> {
+                type Error = ParlexError;
+                fn try_from(v: Value) -> Result<Self, ParlexError> {
                     match v {
                         Value::$Variant(x) => Ok(x),
-                        other => Err(TermParserError::InvalidValue {
-                            expected: stringify!($Variant),
-                            found: other,
+                        other => Err(ParlexError {
+                            message: format!("expected `Value::{}`, found {:?}", stringify!($Variant), other),
+                            span: None,
                         }),
                     }
                 }
@@ -61,14 +61,14 @@ impl_tryfrom_value! {
 
 // Implements TryFrom<Value> for Option<Term>
 impl TryFrom<Value> for Option<Term> {
-    type Error = TermParserError;
-    fn try_from(v: Value) -> Result<Self, TermParserError> {
+    type Error = ParlexError;
+    fn try_from(v: Value) -> Result<Self, ParlexError> {
         match v {
             Value::None => Ok(None),
             Value::Term(x) => Ok(Some(x)),
-            other => Err(TermParserError::InvalidValue {
-                expected: "Term or None",
-                found: other,
+            other => Err(ParlexError {
+                message: format!("expected `Value::Term` or `Value::None`, found {:?}", other),
+                span: None,
             }),
         }
     }
@@ -88,7 +88,7 @@ pub struct TermToken {
     /// The associated value (if any).
     pub value: Value,
     /// The line number where the token was recognized.
-    pub line_no: usize,
+    pub span: Option<Span>,
     /// Optional operator definition index.
     pub op_tab_index: Option<usize>,
 }
@@ -103,11 +103,11 @@ impl TermToken {
     ///
     /// The `op_tab_index` field is initialized to `None` by default.
     #[must_use]
-    pub fn new(token_id: TokenID, value: Value, line_no: usize) -> Self {
+    pub fn new(token_id: TokenID, value: Value, span: Option<Span>) -> Self {
         Self {
             token_id,
             value,
-            line_no,
+            span,
             op_tab_index: None,
         }
     }
@@ -121,8 +121,8 @@ impl Token for TermToken {
     fn token_id(&self) -> Self::TokenID {
         self.token_id
     }
-    fn line_no(&self) -> usize {
-        self.line_no
+    fn span(&self) -> Option<Span> {
+        self.span
     }
 }
 
@@ -145,7 +145,7 @@ mod tests {
         let err = usize::try_from(v).expect_err("None -> usize must error");
         let msg = format!("{err:#}");
         // Should mention we expected Index and say what we actually got
-        assert!(msg.contains("expected Index"), "msg={msg}");
+        assert!(msg.contains("expected `Value::Index`"), "msg={msg}");
         assert!(msg.contains("None"), "msg={msg}");
     }
 
@@ -161,8 +161,12 @@ mod tests {
         let v = Value::Index(7);
         let err = <Option<Term>>::try_from(v).expect_err("Index -> Option<Term> must error");
         let msg = format!("{err:#}");
+        dbg!(&msg);
         // Message from the impl should be clear
-        assert!(msg.contains("expected Term or None"), "msg={msg}");
+        assert!(
+            msg.contains("expected `Value::Term` or `Value::None`"),
+            "msg={msg}"
+        );
     }
 
     #[test]

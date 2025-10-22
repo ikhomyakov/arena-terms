@@ -10,15 +10,14 @@
 //! [`parser_oper_defs`]: arena_terms_parser::parser::parser_oper_defs
 //! [`Arena`]: arena_terms::Arena
 
-use anyhow::Result;
 use arena_terms::{Arena, Term};
-use arena_terms_parser::parser::{TermParser, parser_oper_defs};
+use arena_terms_parser::TermParser;
 use clap::{Parser as ClapParser, Subcommand};
-use parlex::{Lexer, Parser};
-use smartstring::alias::String;
-use std::io::{self, BufReader, Read};
-use std::iter::FusedIterator;
+use parlex::ParlexError;
+use std::fs::File;
+use std::io::BufReader;
 use std::mem;
+use try_next::TryNextWithContext;
 
 #[derive(ClapParser, Debug)]
 #[command(version, about, long_about = None)]
@@ -43,16 +42,7 @@ enum Commands {
     Sizes {},
 }
 
-fn open_input(path: &str) -> Result<impl FusedIterator<Item = u8>> {
-    let iter = BufReader::new(std::fs::File::open(path)?)
-        .bytes()
-        .map(Result::unwrap)
-        .fuse();
-
-    Ok(iter)
-}
-
-fn main() -> Result<()> {
+fn main() -> Result<(), ParlexError> {
     env_logger::init();
 
     let args = Args::parse();
@@ -63,19 +53,20 @@ fn main() -> Result<()> {
             terms: terms_path,
         } => {
             let mut arena = Arena::new();
-            let mut parser =
-                TermParser::try_new(open_input(&terms_path)?, Some(parser_oper_defs(&mut arena)))?;
+            arena.define_default_opers().unwrap();
+            let input = BufReader::new(
+                File::open(&terms_path).map_err(|e| ParlexError::from_err(e, None))?,
+            );
+            let mut parser = TermParser::try_new(input)?;
             if let Some(defs_path) = defs_path {
-                parser.define_opers(&mut arena, open_input(&defs_path)?, None)?;
-            }
-            while let Some(term) = parser.try_next_term(&mut arena)? {
-                println!("{} .", term.display(&arena));
-                log::debug!("{} .", term.display(&arena));
-                log::info!(
-                    "Stats: {:?}, {:?}",
-                    parser.ctx().lexer.stats(),
-                    parser.stats()
+                let defs_input = BufReader::new(
+                    File::open(&defs_path).map_err(|e| ParlexError::from_err(e, None))?,
                 );
+                TermParser::define_opers(&mut arena, defs_input)?;
+            }
+            while let Some(term) = parser.try_next_with_context(&mut arena)? {
+                println!("{} .", term.display(&arena));
+                dbg!(parser.stats());
             }
         }
         Commands::Sizes {} => {
