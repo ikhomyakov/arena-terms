@@ -125,6 +125,14 @@ impl Arena {
         Self::with_capacity(4096, 1024)
     }
 
+    /// Create a new, empty arena with default operator definitions
+    /// and default capacities.
+    pub fn try_with_default_opers() -> Result<Self, TermError> {
+        let mut arena = Self::new();
+        arena.define_default_opers()?;
+        Ok(arena)
+    }
+
     /// Returns stats.
     pub fn stats(&self) -> ArenaStats {
         ArenaStats {

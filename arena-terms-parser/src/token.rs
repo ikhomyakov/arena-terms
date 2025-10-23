@@ -113,6 +113,22 @@ impl TermToken {
     }
 }
 
+impl TermToken {
+    pub fn merge_span(&mut self, other_token: &TermToken) {
+        match other_token.span() {
+            Some(other_span) => match &mut self.span {
+                Some(span) => {
+                    *span = span.merge(&other_span);
+                }
+                None => {
+                    self.span = Some(other_span);
+                }
+            },
+            None => (),
+        }
+    }
+}
+
 /// Implements the [`Token`] trait for [`TermToken`], allowing integration
 /// with the `parlex` core library.
 impl Token for TermToken {

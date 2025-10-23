@@ -589,6 +589,11 @@ impl Arena {
         Ok(())
     }
 
+    /// Clears all operator definitions and compound term metadata.
+    pub fn clear_opers(&mut self) {
+        self.opers.map.clear();
+    }
+
     /// Normalizes a parsed term using its operator definition.
     ///
     /// This process transforms terms according to their declared fixity,

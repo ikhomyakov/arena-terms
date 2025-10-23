@@ -45,14 +45,6 @@ if let Ok(View::Func(_, name, args)) = term.view(&arena) {
 }
 ```
 
-**Add to your `Cargo.toml`:**
-
-```toml
-[dependencies]
-arena-terms = "0.3"
-```
-
-See the [crate documentation](https://docs.rs/arena-terms) for full API details.
 
 ### 🔧 [arena-terms-parser](./arena-terms-parser)
 
@@ -67,7 +59,8 @@ A **parser** for arena-backed Prolog-like terms, built using the [`parlex`](http
 
 ```rust
 use arena_terms::Arena;
-use arena_terms_parser::parser::TermParser;
+use arena_terms_parser::{TermParser, define_opers};
+use try_next::{IterInput, TryNextWithContext};
 
 const DEFS: &str = "[
     op('+'(x,y), infix, 380, left),
@@ -80,27 +73,16 @@ const TERMS: &str = "
 ";
 
 fn main() {
-    let mut arena = Arena::new();
+    let mut arena = Arena::try_with_default_opers().unwrap();
+    define_opers(&mut arena, IterInput::from(DEFS.bytes())).unwrap();
+    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes())).unwrap();
 
-    let mut parser = TermParser::try_new(TERMS.bytes().fuse(), None).unwrap();
-
-    parser.define_opers(&mut arena, DEFS.bytes().fuse(), None).unwrap();
-
-    while let Some(term) = parser.try_next_term(&mut arena).unwrap() {
+    while let Some(term) = parser.try_next_with_context(&mut arena).unwrap() {
         println!("{}", term.display(&arena));
     }
 }
 ```
 
-**Add to your `Cargo.toml`:**
-
-```toml
-[dependencies]
-arena-terms-parser = "0.3"
-arena-terms = "0.3"
-```
-
-See the [crate documentation](https://docs.rs/arena-terms-parser) for full API details.
 
 ## Building & testing
 
@@ -111,11 +93,6 @@ cargo build
 cargo test
 ```
 
-You can also build/test an individual crate with `-p`, e.g.:
-
-```bash
-cargo test -p arena-terms
-```
 
 ## License
 

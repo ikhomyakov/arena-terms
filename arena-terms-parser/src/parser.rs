@@ -324,9 +324,10 @@ where
 
             ProdID::Term2 => {
                 // Term -> Expr .
-                parser.tokens_pop();
+                let dot = parser.tokens_pop();
                 let mut expr_tok = parser.tokens_pop();
                 expr_tok.token_id = TokenID::Term;
+                expr_tok.merge_span(&dot);
                 parser.tokens_push(expr_tok);
             }
 
@@ -337,15 +338,16 @@ where
 
             ProdID::Term4 => {
                 // Term -> .
-                parser.tokens_pop();
-                parser.tokens_push(TermToken::new(TokenID::Term, Value::None, token.span()));
+                let dot = parser.tokens_pop();
+                parser.tokens_push(TermToken::new(TokenID::Term, Value::None, dot.span()));
             }
 
             ProdID::Func => {
                 // Expr -> func Seq )
-                parser.tokens_pop();
+                let right_paren = parser.tokens_pop();
                 let index = usize::try_from(parser.tokens_pop().value)?;
-                let func_tok = parser.tokens_pop();
+                let mut func_tok = parser.tokens_pop();
+                func_tok.merge_span(&right_paren);
                 let span = func_tok.span();
                 let op_tab_index = func_tok.op_tab_index;
                 let functor = Term::try_from(func_tok.value)?;
@@ -365,9 +367,10 @@ where
 
             ProdID::List => {
                 // Expr -> [ Seq ]
-                parser.tokens_pop();
+                let right_brack_tok = parser.tokens_pop();
                 let seq_tok = parser.tokens_pop();
-                let left_brack_tok = parser.tokens_pop();
+                let mut left_brack_tok = parser.tokens_pop();
+                left_brack_tok.merge_span(&right_brack_tok);
                 let index = usize::try_from(seq_tok.value)?;
 
                 let term = arena.list(&self.terms[index..]);
@@ -382,8 +385,9 @@ where
 
             ProdID::Nil => {
                 // Expr -> [ ]
-                parser.tokens_pop();
-                let left_brack_tok = parser.tokens_pop();
+                let right_brack_tok = parser.tokens_pop();
+                let mut left_brack_tok = parser.tokens_pop();
+                left_brack_tok.merge_span(&right_brack_tok);
                 parser.tokens_push(TermToken::new(
                     TokenID::Expr,
                     Value::Term(Term::NIL),
@@ -393,11 +397,12 @@ where
 
             ProdID::List2 => {
                 // Expr -> [ Seq | Expr ]
-                parser.tokens_pop();
+                let right_brack_tok = parser.tokens_pop();
                 let tail = Term::try_from(parser.tokens_pop().value)?;
                 parser.tokens_pop();
                 let index = usize::try_from(parser.tokens_pop().value)?;
-                let left_brack_tok = parser.tokens_pop();
+                let mut left_brack_tok = parser.tokens_pop();
+                left_brack_tok.merge_span(&right_brack_tok);
 
                 let term = arena.listc(&self.terms[index..], tail);
                 self.terms.truncate(index);
@@ -411,9 +416,10 @@ where
 
             ProdID::Tuple => {
                 // Expr -> ( Seq )
-                parser.tokens_pop();
+                let right_paren_tok = parser.tokens_pop();
                 let seq_tok = parser.tokens_pop();
-                let left_paren_tok = parser.tokens_pop();
+                let mut left_paren_tok = parser.tokens_pop();
+                left_paren_tok.merge_span(&right_paren_tok);
 
                 let index = usize::try_from(seq_tok.value)?;
 
@@ -436,8 +442,10 @@ where
 
             ProdID::Unit => {
                 // Expr -> ( )
-                parser.tokens_pop();
-                let left_paren_tok = parser.tokens_pop();
+                let right_paren_tok = parser.tokens_pop();
+                let mut left_paren_tok = parser.tokens_pop();
+                left_paren_tok.merge_span(&right_paren_tok);
+
                 parser.tokens_push(TermToken::new(
                     TokenID::Expr,
                     Value::Term(Term::UNIT),
@@ -471,7 +479,8 @@ where
                 // Expr -> Expr atomOper Expr
                 let expr2_tok = parser.tokens_pop();
                 let oper_tok = parser.tokens_pop();
-                let expr1_tok = parser.tokens_pop();
+                let mut expr1_tok = parser.tokens_pop();
+                expr1_tok.merge_span(&expr2_tok);
                 let span = expr1_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -495,7 +504,9 @@ where
                 parser.tokens_pop();
                 let index = usize::try_from(parser.tokens_pop().value)?;
                 let oper_tok = parser.tokens_pop();
-                let expr1_tok = parser.tokens_pop();
+                let mut expr1_tok = parser.tokens_pop();
+                expr1_tok.merge_span(&expr2_tok);
+
                 let span = expr1_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -520,7 +531,9 @@ where
             ProdID::Prefix1 => {
                 // Expr -> atom Expr
                 let expr1_tok = parser.tokens_pop();
-                let oper_tok = parser.tokens_pop();
+                let mut oper_tok = parser.tokens_pop();
+                oper_tok.merge_span(&expr1_tok);
+
                 let span = oper_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -570,7 +583,9 @@ where
                 let expr1_tok = parser.tokens_pop();
                 parser.tokens_pop();
                 let index = usize::try_from(parser.tokens_pop().value)?;
-                let oper_tok = parser.tokens_pop();
+                let mut oper_tok = parser.tokens_pop();
+                oper_tok.merge_span(&expr1_tok);
+
                 let span = oper_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -594,7 +609,9 @@ where
             ProdID::Postfix1 => {
                 // Expr -> Expr atomOper
                 let oper_tok = parser.tokens_pop();
-                let expr1_tok = parser.tokens_pop();
+                let mut expr1_tok = parser.tokens_pop();
+                expr1_tok.merge_span(&oper_tok);
+
                 let span = expr1_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -613,10 +630,12 @@ where
 
             ProdID::Postfix2 => {
                 // Expr -> Expr func Seq )
-                parser.tokens_pop();
+                let right_paren_tok = parser.tokens_pop();
                 let index = usize::try_from(parser.tokens_pop().value)?;
                 let oper_tok = parser.tokens_pop();
-                let expr1_tok = parser.tokens_pop();
+                let mut expr1_tok = parser.tokens_pop();
+                expr1_tok.merge_span(&right_paren_tok);
+
                 let span = expr1_tok.span();
                 let op_tab_index = oper_tok.op_tab_index;
 
@@ -648,6 +667,7 @@ where
                 // Seq -> BareSeq ,
                 parser.tokens_pop();
                 let mut bare_seq_tok = parser.tokens_pop();
+
                 bare_seq_tok.token_id = TokenID::Seq;
                 parser.tokens_push(bare_seq_tok);
             }
@@ -679,7 +699,7 @@ where
 
 /// Prolog-like term parser with operator precedence and associativity handling.
 ///
-/// The [`TermParser0`] drives the parsing of Prolog-style terms using the
+/// The [`TermTokenParser`] drives the parsing of Prolog-style terms using the
 /// [`parlex`] SLR(1) core library. It builds upon the [`TermLexer`] for tokenization
 /// and produces [`Term`] values stored in an [`Arena`] for efficient allocation.
 ///
@@ -727,13 +747,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermParser0, TokenID, Value};
+/// # use arena_terms_parser::{TermToken, TermTokenParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
-/// let mut arena = Arena::new();
-/// arena.define_default_opers().unwrap();
+/// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
-/// let mut parser = TermParser0::try_new(input).unwrap();
+/// let mut parser = TermTokenParser::try_new(input).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 4);
 /// ```
@@ -743,18 +762,18 @@ where
 /// [`OperDefs`]: crate::OperDefs
 /// [`TermLexer`]: crate::TermLexer
 /// [`TermToken`]: crate::TermToken
-pub struct TermParser0<I>
+pub struct TermTokenParser<I>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     parser: Parser<TermLexer<I>, TermParserDriver<TermLexer<I>>, Arena>,
 }
 
-impl<I> TermParser0<I>
+impl<I> TermTokenParser<I>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
-    /// Creates a new [`TermParser0`] for the given input stream and operator definitions.
+    /// Creates a new [`TermTokenParser`] for the given input stream and operator definitions.
     ///
     /// # Parameters
     /// - `input`: A fused iterator over bytes to be parsed.
@@ -775,44 +794,35 @@ where
         let parser = Parser::new(lexer, driver);
         Ok(Self { parser })
     }
-
-    /// Defines or extends operator definitions directly from a Prolog-like
-    /// `op/6` term list read from a separate input source.
-    ///
-    /// This allows dynamic addition of new operator fixities and precedence
-    /// rules during parsing.
-    ///
-    /// # Parameters
-    /// - `arena`: Arena allocator used for constructing term structures.
-    /// - `defs_input`: Input byte iterator yielding the operator definition terms.
-    /// - `opers`: Optional initial operator table to extend.
-    ///   If `None`, the default operator definitions are used.
-    ///
-    /// # Errors
-    /// Returns an error if parsing the operator term list fails or produces
-    /// an invalid operator specification.
-    pub fn define_opers(arena: &mut Arena, defs_input: I) -> Result<(), ParlexError> {
-        let mut defs_parser = TermParser0::try_new(defs_input)?;
-        while let Some(TermToken { value, .. }) = defs_parser.try_next_with_context(arena)? {
-            //log::trace!("Stats: {:?}", defs_parser.stats(),);
-            match value {
-                Value::Term(term) => arena
-                    .define_opers(term)
-                    .map_err(|e| ParlexError::from_err(e, None))?,
-                Value::None => continue,
-                Value::Index(_) => {
-                    return Err(ParlexError {
-                        message: format!("index token not expected"),
-                        span: None,
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
-impl<I> TryNextWithContext<Arena, (LexerStats, ParserStats)> for TermParser0<I>
+/// Defines or extends operator definitions directly from a Prolog-like
+/// `op/6` term list read from an input source.
+///
+/// This allows dynamic addition of new operator fixities and precedence
+/// rules during parsing.
+///
+/// # Parameters
+/// - `arena`: Arena allocator used for constructing term structures.
+/// - `defs_input`: Input byte iterator yielding the operator definition terms.
+///
+/// # Errors
+/// Returns an error if parsing the operator term list fails or produces
+/// an invalid operator specification.
+pub fn define_opers<I>(arena: &mut Arena, defs_input: I) -> Result<(), ParlexError>
+where
+    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+{
+    let mut defs_parser = TermParser::try_new(defs_input)?;
+    while let Some(term) = defs_parser.try_next_with_context(arena)? {
+        arena
+            .define_opers(term)
+            .map_err(|e| ParlexError::from_err(e, None))?;
+    }
+    Ok(())
+}
+
+impl<I> TryNextWithContext<Arena, (LexerStats, ParserStats)> for TermTokenParser<I>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
@@ -859,7 +869,7 @@ where
 /// Prolog-like term parser with operator precedence and associativity handling.
 ///
 /// The [`TermParser`] drives the parsing of Prolog-style terms using the
-/// [`parlex`] SLR(1) core library. It builds upon the [`TermParser0`] for tokenization
+/// [`parlex`] SLR(1) core library. It builds upon the [`TermTokenParser`] for tokenization
 /// and produces [`Term`] values stored in an [`Arena`] for efficient allocation.
 ///
 /// Operator definitions are resolved dynamically through an [`OperDefs`] table,
@@ -909,8 +919,7 @@ where
 /// # use arena_terms_parser::{TermToken, TermParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
-/// let mut arena = Arena::new();
-/// arena.define_default_opers().unwrap();
+/// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
 /// let mut parser = TermParser::try_new(input).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
@@ -926,7 +935,7 @@ pub struct TermParser<I>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
-    pub(crate) parser: TermParser0<I>,
+    pub(crate) parser: TermTokenParser<I>,
 }
 
 impl<I> TermParser<I>
@@ -946,27 +955,8 @@ where
     /// Returns an error if the lexer context cannot be initialized
     /// or if the generated parser tables fail to load.
     pub fn try_new(input: I) -> Result<Self, ParlexError> {
-        let parser: TermParser0<I> = TermParser0::try_new(input)?;
+        let parser: TermTokenParser<I> = TermTokenParser::try_new(input)?;
         Ok(Self { parser })
-    }
-
-    /// Defines or extends operator definitions directly from a Prolog-like
-    /// `op/6` term list read from a separate input source.
-    ///
-    /// This allows dynamic addition of new operator fixities and precedence
-    /// rules during parsing.
-    ///
-    /// # Parameters
-    /// - `arena`: Arena allocator used for constructing term structures.
-    /// - `defs_input`: Input byte iterator yielding the operator definition terms.
-    /// - `opers`: Optional initial operator table to extend.
-    ///   If `None`, the default operator definitions are used.
-    ///
-    /// # Errors
-    /// Returns an error if parsing the operator term list fails or produces
-    /// an invalid operator specification.
-    pub fn define_opers(arena: &mut Arena, defs_input: I) -> Result<(), ParlexError> {
-        TermParser0::define_opers(arena, defs_input)
     }
 }
 
@@ -1052,7 +1042,7 @@ op(not(x),prefix,800,right),
         let mut parser = TermParser::try_new(input).expect("cannot create parser");
         if let Some(defs) = defs {
             let defs_input = IterInput::from(defs.bytes());
-            TermParser::define_opers(arena, defs_input).expect("cannot define ops");
+            define_opers(arena, defs_input).expect("cannot define ops");
         }
         let ts = parser
             .try_collect_with_context(arena)
@@ -1064,8 +1054,7 @@ op(not(x),prefix,800,right),
     #[test]
     fn one_term() {
         let _ = env_logger::builder().is_test(true).try_init();
-        let arena = &mut Arena::new();
-        arena.define_default_opers().unwrap();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
         let ts = parse(arena, Some(SAMPLE_DEFS), " . . 2 * 2 <= 5 . .");
         dbg!(&ts);
         let s = format!("{}", ts[0].display(arena));
@@ -1077,15 +1066,14 @@ op(not(x),prefix,800,right),
     #[test]
     #[should_panic]
     fn missing_ops() {
-        let arena = &mut Arena::new();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
         let _ts = parse(arena, None, "2 * 2 <= 5");
     }
 
     #[test]
     fn more_complicated_term() {
         let _ = env_logger::builder().is_test(true).try_init();
-        let arena = &mut Arena::new();
-        arena.define_default_opers().unwrap();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
         let x = "(
 [(1, 2) | unit] ++ foo(baz(1e-9)),
 date{2025-09-30T18:24:22.154Z},

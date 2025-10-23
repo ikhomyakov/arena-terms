@@ -44,5 +44,5 @@ mod token;
 
 pub use lexer::{TermLexer, TermLexerDriver};
 pub use parser::parser_data::TokenID;
-pub use parser::{TermParser, TermParser0, TermParserDriver};
+pub use parser::{TermParser, TermParserDriver, TermTokenParser, define_opers};
 pub use token::{TermToken, Value};

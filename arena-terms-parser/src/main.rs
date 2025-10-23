@@ -11,9 +11,9 @@
 //! [`Arena`]: arena_terms::Arena
 
 use arena_terms::{Arena, Term};
-use arena_terms_parser::TermParser;
+use arena_terms_parser::{TermTokenParser, define_opers};
 use clap::{Parser as ClapParser, Subcommand};
-use parlex::ParlexError;
+use parlex::{ParlexError, Token};
 use std::fs::File;
 use std::io::BufReader;
 use std::mem;
@@ -52,21 +52,26 @@ fn main() -> Result<(), ParlexError> {
             defs: defs_path,
             terms: terms_path,
         } => {
-            let mut arena = Arena::new();
-            arena.define_default_opers().unwrap();
+            let mut arena = Arena::try_with_default_opers().unwrap();
             let input = BufReader::new(
                 File::open(&terms_path).map_err(|e| ParlexError::from_err(e, None))?,
             );
-            let mut parser = TermParser::try_new(input)?;
+            let mut parser = TermTokenParser::try_new(input)?;
             if let Some(defs_path) = defs_path {
                 let defs_input = BufReader::new(
                     File::open(&defs_path).map_err(|e| ParlexError::from_err(e, None))?,
                 );
-                TermParser::define_opers(&mut arena, defs_input)?;
+                define_opers(&mut arena, defs_input)?;
             }
-            while let Some(term) = parser.try_next_with_context(&mut arena)? {
-                println!("{} .", term.display(&arena));
-                dbg!(parser.stats());
+            while let Some(token) = parser.try_next_with_context(&mut arena)? {
+                dbg!(&parser.stats());
+                dbg!(&token);
+                let span = token.span().unwrap();
+                let term: Option<Term> = token.value.try_into()?;
+                match term {
+                    Some(term) => println!("{} at {:?}", term.display(&arena), span),
+                    None => println!("None at {:?}", span),
+                }
             }
         }
         Commands::Sizes {} => {
