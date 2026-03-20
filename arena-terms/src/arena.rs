@@ -166,7 +166,7 @@ impl Arena {
         self.truncate(self.epoch_ids[0])
     }
 
-    /// Epoch `m` and all epochs more recent than `m` are erased in O(1)
+    /// The current epoch is erased in O(1)
     /// Does not shrink the allocated capacity.
     pub fn truncate_current(&mut self) -> Result<(), TermError> {
         self.truncate(self.epoch_ids[self.current_epoch])
