@@ -1089,7 +1089,183 @@ date{2025-09-30T18:24:22.154Z},
         assert_eq!(ts.len(), 1);
         assert_eq!(
             s,
-            "('++'([(1, 2) | unit], foo(baz(0.000000001))), date{2025-09-30T18:24:22.154+00:00}, '++'('++'('++'('++'(\"aaa\", '+'(1, 2)), \"bbb\"), '*'(3, 4)), \"ccc\"), \"player = {pos = {x = 0, y = 0}, health = 100}\")"
+            "('++'([(1, 2) | unit], foo(baz(0.000000001))), date{2025-09-30T18:24:22.154+00:00}, '++'('++'('++'('++'(\"aaa\", '+'(1, 2)), \"bbb\"), '*'(3, 4)), \"ccc\"), \"player = \\{pos = \\{x = 0, y = 0\\}, health = 100\\}\")"
         );
+    }
+
+    /// Roundtrip test: parse term string → display → reparse → redisplay.
+    /// Verifies that the term printer produces output that the parser can read
+    /// back to produce the same term.
+    ///
+    /// Each vector entry is (term_string, expected_raw_value_or_None).
+    /// - term_string: Aware eXpress syntax to parse
+    /// - expected_raw: if Some, the expected raw string value (for string terms only)
+    ///   if None, the display of the parsed term is used for roundtrip only
+    #[test]
+    fn string_roundtrip_vectors() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        // (term_syntax, expected_display, expected_raw_value_for_strings)
+        // expected_display=None means "same as term_syntax"
+        let vectors: Vec<(&str, Option<&str>, Option<&str>)> = vec![
+            // ── Simple strings ──
+            (r#""hello""#, None, Some("hello")),
+            (r#""""#, None, Some("")),
+            (r#""hello world""#, None, Some("hello world")),
+            (r#""abc def ghi""#, None, Some("abc def ghi")),
+
+            // ── Backslash escapes ──
+            (r#""a\\b""#, None, Some("a\\b")),
+            (r#""a\"b""#, None, Some("a\"b")),
+            (r#""line1\nline2""#, None, Some("line1\nline2")),
+            (r#""col1\tcol2""#, None, Some("col1\tcol2")),
+            (r#""ret\r""#, None, Some("ret\r")),
+            // Named control char escapes — roundtrip through named form
+            (r#""bell\a""#, None, Some("bell\x07")),
+            (r#""bs\b""#, None, Some("bs\x08")),
+            (r#""ff\f""#, None, Some("ff\x0C")),
+            (r#""vt\v""#, None, Some("vt\x0B")),
+            (r#""esc\e""#, None, Some("esc\x1B")),
+            (r#""del\d""#, None, Some("del\x7F")),
+            (r#""a\\b\\c""#, None, Some("a\\b\\c")),
+            (r#""\\\\""#, None, Some("\\\\")),
+            (r#""\\""#, None, Some("\\")),
+
+            // ── Brace escapes (string interpolation prevention) ──
+            (r#""hello \{world\}""#, None, Some("hello {world}")),
+            (r#""\{""#, None, Some("{")),
+            (r#""\}""#, None, Some("}")),
+            (r#""\{\}""#, None, Some("{}")),
+            (r#""a\{b\}c""#, None, Some("a{b}c")),
+            (r#""nested \{a \{b\} c\}""#, None, Some("nested {a {b} c}")),
+            (r#""\\attrDef\{name\}\{value\}""#, None, Some("\\attrDef{name}{value}")),
+            (r#""\\vDefine\{r_\}\{text\}""#, None, Some("\\vDefine{r_}{text}")),
+
+            // ── Hex escapes ──
+            (r#""\x41""#, Some(r#""A""#), Some("A")),
+            (r#""\x00""#, Some(r#""\x00""#), Some("\x00")),
+            (r#""\x7E""#, Some(r#""~""#), Some("~")),
+            // (r#""\xFF""#, None, None), // high byte — not valid UTF-8, skip
+
+            // ── Octal escapes ──
+            (r#""\101""#, Some(r#""A""#), Some("A")),
+            (r#""\0""#, Some(r#""\x00""#), Some("\x00")),
+            (r#""\176""#, Some(r#""~""#), Some("~")),
+
+            // ── Control char escapes ──
+            (r#""\^A""#, Some(r#""\x01""#), Some("\x01")),
+            (r#""\^Z""#, Some(r#""\x1A""#), Some("\x1A")),
+
+            // ── Mixed escapes ──
+            (r#""tab\there\nnewline""#, None, Some("tab\there\nnewline")),
+            (r#""path\\to\\file\{name\}""#, None, Some("path\\to\\file{name}")),
+            (r#""say \"hello\" \{world\}""#, None, Some("say \"hello\" {world}")),
+
+            // ── String interpolation (using {expr}) ──
+            // "aaa{1+2}bbb" parses as '++'('++'("aaa", '+'(1, 2)), "bbb")
+            // This is NOT a simple string, it's an expression
+
+            // ── Atoms (single-quoted) ──
+            ("hello", Some("hello"), None),
+            ("'hello world'", None, None),
+            ("'it\\'s'", None, None),
+
+            // ── Numbers ──
+            ("42", Some("42"), None),
+            ("-7", Some("-7"), None),
+            ("3.14", Some("3.14"), None),
+            ("0", Some("0"), None),
+            ("0.0", Some("0.0"), None),
+
+            // ── Lists ──
+            ("[1, 2, 3]", Some("[1, 2, 3]"), None),
+            ("[]", Some("nil"), None),
+            (r#"["a", "b", "c"]"#, Some(r#"["a", "b", "c"]"#), None),
+
+            // ── Compound terms ──
+            ("foo(1, 2)", Some("foo(1, 2)"), None),
+            (r#"f("hello \{world\}")"#, Some(r#"f("hello \{world\}")"#), None),
+
+            // ── Tuples ──
+            // {expr} at expression level is a raw string with balanced braces
+            ("{1, 2}", Some(r#""1, 2""#), Some("1, 2")),
+            ("{1, 2, 3}", Some(r#""1, 2, 3""#), Some("1, 2, 3")),
+            ("{hello {world} end}", Some(r#""hello \{world\} end""#), Some("hello {world} end")),
+
+            // ── Edge cases ──
+            (r#""  spaces  ""#, None, Some("  spaces  ")),
+            (r#""\n\n\n""#, None, Some("\n\n\n")),
+            (r#""\t\t""#, None, Some("\t\t")),
+            (r#""abc\ndef\tghi""#, None, Some("abc\ndef\tghi")),
+        ];
+
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+
+        for (i, (term_str, expected_display, expected_raw)) in vectors.iter().enumerate() {
+            // Parse the term string
+            let terms = parse(arena, None, &format!("{} .", term_str));
+            assert!(
+                !terms.is_empty(),
+                "vector {}: failed to parse: {}",
+                i, term_str
+            );
+            let term = terms[0];
+
+            // Check raw value for string terms
+            if let Some(raw) = expected_raw {
+                match term.view(arena).unwrap() {
+                    View::Str(s) => {
+                        assert_eq!(
+                            s, *raw,
+                            "vector {}: raw value mismatch for {}\n  got:      {:?}\n  expected: {:?}",
+                            i, term_str, s, raw
+                        );
+                    }
+                    _ => {
+                        // Not a string — skip raw check
+                    }
+                }
+            }
+
+            // Display the term
+            let displayed = format!("{}", term.display(arena));
+            let expected_disp = expected_display.unwrap_or(term_str);
+            assert_eq!(
+                displayed, expected_disp,
+                "vector {}: display mismatch for {}\n  got:      {}\n  expected: {}",
+                i, term_str, displayed, expected_disp
+            );
+
+            // Roundtrip: reparse the displayed string
+            let terms2 = parse(arena, None, &format!("{} .", displayed));
+            assert!(
+                !terms2.is_empty(),
+                "vector {}: failed to reparse displayed: {}",
+                i, displayed
+            );
+            let term2 = terms2[0];
+
+            // Redisplay and compare
+            let redisplayed = format!("{}", term2.display(arena));
+            assert_eq!(
+                redisplayed, displayed,
+                "vector {}: roundtrip display mismatch\n  original:    {}\n  displayed:   {}\n  redisplayed: {}",
+                i, term_str, displayed, redisplayed
+            );
+
+            // Check raw value roundtrip for strings
+            if let Some(raw) = expected_raw {
+                match term2.view(arena).unwrap() {
+                    View::Str(s) => {
+                        assert_eq!(
+                            s, *raw,
+                            "vector {}: roundtrip raw value mismatch\n  got:      {:?}\n  expected: {:?}",
+                            i, s, raw
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 }

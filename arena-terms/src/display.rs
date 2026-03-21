@@ -80,10 +80,18 @@ impl<'a> fmt::Display for TermDisplay<'a> {
                 match ch {
                     '\\' => out.push_str("\\\\"),
                     '"' => out.push_str("\\\""),
+                    '{' => out.push_str("\\{"),
+                    '}' => out.push_str("\\}"),
                     '\n' => out.push_str("\\n"),
                     '\r' => out.push_str("\\r"),
                     '\t' => out.push_str("\\t"),
-                    c if c.is_control() => out.push_str(&format!("\\x{:02X}\\", c as u32)),
+                    '\x07' => out.push_str("\\a"),
+                    '\x08' => out.push_str("\\b"),
+                    '\x0C' => out.push_str("\\f"),
+                    '\x0B' => out.push_str("\\v"),
+                    '\x1B' => out.push_str("\\e"),
+                    '\x7F' => out.push_str("\\d"),
+                    c if c.is_control() => out.push_str(&format!("\\x{:02X}", c as u32)),
                     c => out.push(c),
                 }
             }
