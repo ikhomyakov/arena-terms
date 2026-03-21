@@ -39,8 +39,8 @@ let term = func![
     => &mut arena
 ];
 
-if let Ok(View::Func(_, name, args)) = term.view(&arena) {
-    assert_eq!(name, "example");
+if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
+    assert_eq!(ar.atom_name(functor).unwrap(), "example");
     assert_eq!(args.len(), 4);
 }
 ```
@@ -96,7 +96,7 @@ cargo test
 
 ## License
 
-Copyright (c) 2005–2025 IKH Software, Inc.
+Copyright (c) 2005–2026 IKH Software, Inc.
 
 Released under the terms of the GNU Lesser General Public License, version 3.0 or (at your option) any later version (LGPL-3.0-or-later).
 

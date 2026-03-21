@@ -1,5 +1,44 @@
 # Release Notes
 
+## [0.5.0] — 2026-03-20
+
+### Breaking Changes
+
+* **Term display: strings containing `{` and `}` are now escaped as `\{` and `\}`.**
+  Previously, braces were emitted verbatim. Since bare `{` triggers string interpolation in Aware eXpress, this made `Display` output non-roundtrippable for strings containing braces.
+
+* **Control character display format changed.**
+  Previously, control characters were displayed as `\xHH\` (with a trailing backslash). This trailing backslash is not valid Aware eXpress syntax and broke roundtripping. Control characters are now displayed as `\xHH` (no trailing backslash), and common control characters use named escapes: `\a`, `\b`, `\f`, `\v`, `\e`, `\d`.
+
+### Added
+
+* Named escape sequences in string display: `\a` (bell), `\b` (backspace), `\f` (form feed), `\v` (vertical tab), `\e` (escape), `\d` (delete).
+* Comprehensive roundtrip test suite (`string_roundtrip_vectors`) with ~50 test vectors covering all escape sequences, brace escaping, hex/octal escapes, and edge cases.
+
+### Fixed
+
+* `truncate_current` doc comment corrected to describe actual behavior (erases current epoch, not epoch `m`).
+
+## [0.4.0] — 2025-10-23
+
+### Breaking Changes
+
+* **Crate split into submodules.** The `arena-terms` crate internals were reorganized from a single `lib.rs` into separate modules: `arena.rs`, `term.rs`, `view.rs`, `display.rs`, `error.rs`, `oper.rs`. Public API is re-exported from `lib.rs` and is unchanged.
+
+* **Operator definitions (`oper.rs`) moved from `arena-terms-parser` to `arena-terms`.** This allows the core crate to carry default operator tables without depending on the parser.
+
+* **`Arena::try_with_default_opers()`** — new constructor that initializes an arena with the standard operator table. Previously, operators were only available through the parser crate.
+
+* **Lexer and parser upgraded** to work with `parlex` 0.3 and `try-next` 0.4. The parser now tracks source spans in the lexer and parser.
+
+### Added
+
+* `display.rs` — `TermDisplay` and `fmt::Display` implementation extracted into its own module.
+* `error.rs` — `TermError` type extracted into its own module.
+* `token.rs` — Token type definitions for the parser.
+* Default operator table embedded in `arena-terms` via `oper.rs`.
+* Source span tracking in the lexer and parser.
+
 ## [0.3.0] — 2025-09-29
 
 ### ⚠️  Breaking Changes

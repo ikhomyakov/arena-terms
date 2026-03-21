@@ -52,7 +52,7 @@ let term = func![
 
 // inspect the resulting term
 if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
-    assert_eq!(functor, "example");
+    assert_eq!(ar.atom_name(functor).unwrap(), "example");
     assert_eq!(args.len(), 5);
     // view nested terms recursively
     match args[2].view(ar).unwrap() {
@@ -183,7 +183,7 @@ pub enum View<'a> {
     Atom(&'a str),                          // atom names
     Str(&'a str),                           // UTF‑8 strings
     Bin(&'a [u8]),                          // binary slices
-    Func(&'a Arena, &'a str, &'a [Term]),   // compound terms (funcs)
+    Func(&'a Arena, &'a Term, &'a [Term]),   // compound terms (funcs)
     List(&'a Arena, &'a [Term], &'a Term),  // lists
     Tuple(&'a Arena, &'a [Term]),           // tuples
 }
@@ -423,7 +423,7 @@ let term = func![
 
 // inspect the resulting term
 if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
-    assert_eq!(functor, "example");
+    assert_eq!(ar.atom_name(functor).unwrap(), "example");
     assert_eq!(args.len(), 5);
     // view nested terms recursively
     match args[2].view(ar).unwrap() {
@@ -498,7 +498,7 @@ This project is still evolving. The following limitations are known and may affe
 
 ## License
 
-Copyright (c) 2005–2025 IKH Software, Inc.
+Copyright (c) 2005–2026 IKH Software, Inc.
 
 Released under the terms of the GNU Lesser General Public License, version 3.0
 or (at your option) any later version (LGPL-3.0-or-later).
