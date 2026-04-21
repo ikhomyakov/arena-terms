@@ -1,5 +1,11 @@
 # Release Notes
 
+## [0.6.0] — 2026-04-21
+
+### Changed
+
+* **License changed from LGPL-3.0-or-later to MIT.**
+
 ## [0.5.0] — 2026-03-20
 
 ### Breaking Changes

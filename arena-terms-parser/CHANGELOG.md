@@ -1,5 +1,15 @@
 # Release Notes
 
+## [0.6.0] — 2026-04-21
+
+### Changed
+
+* **License changed from LGPL-3.0-or-later to MIT.**
+
+### Dependencies
+
+* Requires `arena-terms` 0.6.0.
+
 ## [0.5.0] — 2026-03-20
 
 ### Added

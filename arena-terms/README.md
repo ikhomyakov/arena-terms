@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/arena-terms.svg)](https://crates.io/crates/arena-terms)
 [![Documentation](https://docs.rs/arena-terms/badge.svg)](https://docs.rs/arena-terms)
-[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 
@@ -500,8 +500,7 @@ This project is still evolving. The following limitations are known and may affe
 
 Copyright (c) 2005–2026 IKH Software, Inc.
 
-Released under the terms of the GNU Lesser General Public License, version 3.0
-or (at your option) any later version (LGPL-3.0-or-later).
+Released under the [MIT License](https://opensource.org/licenses/MIT).
 
 See [LICENSE.md](./LICENSE.md) for details.
 

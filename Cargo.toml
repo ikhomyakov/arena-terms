@@ -3,17 +3,17 @@ members = ["arena-terms", "arena-terms-parser"]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.89"
 authors = ["IKH Software, Inc. <support@ikhsoftware.com>"]
-license = "LGPL-3.0-or-later"
+license = "MIT"
 repository = "https://github.com/ikhomyakov/arena-terms.git"
 keywords = ["term", "arena", "immutable", "parser", "prolog"]
 categories = ["parsing", "data-structures"]
 
 [workspace.dependencies]
-arena-terms = { version = "0.5.0", path = "arena-terms" }
+arena-terms = { version = "0.6.0", path = "arena-terms" }
 parlex = { version = "0.3.0", path = "../parlex/parlex" }
 parlex-gen = { version = "0.3.0", path = "../parlex/parlex-gen" }
 try-next = { version = "0.4.0", path = "../try-next" }
