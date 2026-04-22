@@ -21,6 +21,7 @@ cargo fmt                            # Auto-format
 ```bash
 cargo run -p arena-terms-parser -- parse --terms input.ax
 cargo run -p arena-terms-parser -- parse --defs ops.ax --terms input.ax
+cargo run -p arena-terms-parser -- parse --encoding iso-8859-1 --terms input.ax
 cargo run -p arena-terms-parser -- sizes
 ```
 
@@ -29,7 +30,7 @@ cargo run -p arena-terms-parser -- sizes
 Two crates in a Cargo workspace (edition 2024, MSRV 1.89+):
 
 - **arena-terms/** — Core library: 16-byte copyable `Term` handles, epoch-based `Arena` allocator, borrowed `View<'a>`, operator definitions, display/formatting.
-- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, and `define_opers`.
+- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, `define_opers`, and `Encoding`. Supports multiple input encodings (UTF-8, ASCII, ISO-8859-1, Windows-1252, raw bytes) with all internal representation in UTF-8.
 
 ## Architecture
 
@@ -54,8 +55,8 @@ The `TermParserDriver` resolves operator precedence/associativity during shift-r
 
 ### Local (unpublished) dependencies
 
-- **parlex** / **parlex-gen** (0.3.0) — Lexer/parser framework and code generators
-- **try-next** (0.4.0) — Fallible iterator trait used by the parser
+- **parlex** / **parlex-gen** (0.4.0) — Lexer/parser framework and code generators (encoding-agnostic, byte-level DFA)
+- **try-next** (0.5.0) — Fallible iterator trait used by the parser
 
 ## Key Invariants
 

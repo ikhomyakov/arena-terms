@@ -59,7 +59,7 @@ A **parser** for arena-backed Prolog-like terms, built using the [`parlex`](http
 
 ```rust
 use arena_terms::Arena;
-use arena_terms_parser::{TermParser, define_opers};
+use arena_terms_parser::{Encoding, TermParser, define_opers};
 use try_next::{IterInput, TryNextWithContext};
 
 const DEFS: &str = "[
@@ -74,8 +74,8 @@ const TERMS: &str = "
 
 fn main() {
     let mut arena = Arena::try_with_default_opers().unwrap();
-    define_opers(&mut arena, IterInput::from(DEFS.bytes())).unwrap();
-    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes())).unwrap();
+    define_opers(&mut arena, IterInput::from(DEFS.bytes()), Encoding::Utf8).unwrap();
+    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes()), Encoding::Utf8).unwrap();
 
     while let Some(term) = parser.try_next_with_context(&mut arena).unwrap() {
         println!("{}", term.display(&arena));

@@ -25,6 +25,11 @@ crate to store terms efficiently in an arena and is built on top of the
 - **Operators**
   Dynamically handles operator fixity, associativity, and precedence rules.
 
+- **Multi-encoding**
+  Supports UTF-8, US-ASCII, ISO-8859-1 (Latin-1), Windows-1252, and raw bytes.
+  All internal term representation is UTF-8; input bytes are transcoded automatically.
+  Binary content (`bin{...}`) always collects raw source bytes.
+
 - **Arena-backed**
   Terms are stored compactly in arenas for efficient allocation and traversal.
 
@@ -35,7 +40,7 @@ Parsing a string into arena terms:
 
 ```rust
 use arena_terms::Arena;
-use arena_terms_parser::{TermParser, define_opers};
+use arena_terms_parser::{Encoding, TermParser, define_opers};
 use try_next::{IterInput, TryNextWithContext};
 
 const DEFS: &str = "[
@@ -50,8 +55,8 @@ const TERMS: &str = "
 
 fn main() {
     let mut arena = Arena::try_with_default_opers().unwrap();
-    define_opers(&mut arena, IterInput::from(DEFS.bytes())).unwrap();
-    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes())).unwrap();
+    define_opers(&mut arena, IterInput::from(DEFS.bytes()), Encoding::Utf8).unwrap();
+    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes()), Encoding::Utf8).unwrap();
 
     while let Some(term) = parser.try_next_with_context(&mut arena).unwrap() {
         println!("{}", term.display(&arena));
@@ -71,8 +76,12 @@ cargo build --release --bin arena-terms-parser
 Then run:
 
 ```bash
-./target/release/parser --terms input.ax
+./target/release/arena-terms-parser parse --terms input.ax
+./target/release/arena-terms-parser parse --encoding iso-8859-1 --terms input.ax
+./target/release/arena-terms-parser parse --defs ops.ax --terms input.ax
 ```
+
+Supported `--encoding` values: `utf-8` (default), `us-ascii`, `iso-8859-1`, `windows-1252`, `raw`.
 
 
 ## Documentation
