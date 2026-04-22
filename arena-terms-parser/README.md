@@ -26,7 +26,7 @@ crate to store terms efficiently in an arena and is built on top of the
   Dynamically handles operator fixity, associativity, and precedence rules.
 
 - **Multi-encoding**
-  Supports UTF-8, US-ASCII, ISO-8859-1 (Latin-1), Windows-1252, and raw bytes.
+  Supports UTF-8, US-ASCII, ISO-8859-1 (Latin-1), and Windows-1252.
   All internal term representation is UTF-8; input bytes are transcoded automatically.
   Binary content (`bin{...}`) always collects raw source bytes.
 
@@ -81,7 +81,11 @@ Then run:
 ./target/release/arena-terms-parser parse --defs ops.ax --terms input.ax
 ```
 
-Supported `--encoding` values: `utf-8` (default), `us-ascii`, `iso-8859-1`, `windows-1252`, `raw`.
+Supported `--encoding` values: `utf-8` (default), `us-ascii`, `iso-8859-1`, `windows-1252`.
+
+**Note:** In `bin{N:...}` and `text{N:...}`, *N* is the number of **raw bytes**, not characters.
+For example, with UTF-8 input, `text{10:Игорь}` is correct (5 Cyrillic characters = 10 UTF-8 bytes),
+while `text{5:Игорь}` will fail to parse.
 
 
 ## Documentation

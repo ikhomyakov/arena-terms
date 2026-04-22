@@ -37,7 +37,7 @@ enum Commands {
         /// Input file with terms
         #[arg(short, long)]
         terms: String,
-        /// Input encoding (utf-8, us-ascii, iso-8859-1, windows-1252, raw)
+        /// Input encoding (utf-8, us-ascii, iso-8859-1, windows-1252)
         #[arg(short, long, default_value = "utf-8")]
         encoding: String,
     },

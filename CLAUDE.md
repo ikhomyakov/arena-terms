@@ -30,7 +30,7 @@ cargo run -p arena-terms-parser -- sizes
 Two crates in a Cargo workspace (edition 2024, MSRV 1.89+):
 
 - **arena-terms/** — Core library: 16-byte copyable `Term` handles, epoch-based `Arena` allocator, borrowed `View<'a>`, operator definitions, display/formatting.
-- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, `define_opers`, and `Encoding`. Supports multiple input encodings (UTF-8, ASCII, ISO-8859-1, Windows-1252, raw bytes) with all internal representation in UTF-8.
+- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, `define_opers`, and `Encoding`. Supports multiple input encodings (UTF-8, ASCII, ISO-8859-1, Windows-1252) with all internal representation in UTF-8.
 
 ## Architecture
 
@@ -64,3 +64,4 @@ The `TermParserDriver` resolves operator precedence/associativity during shift-r
 - Epochs are strictly LIFO — truncate only in stack order.
 - The parser rejects NaN/Inf; Display may produce unparseable output for them.
 - List arity is always 0 (not Prolog cons cells). Unary tuples are unwrapped by the parser.
+- In `bin{N:...}` and `text{N:...}`, N counts raw bytes, not characters (e.g., `text{10:Игорь}` for 5 Cyrillic chars in UTF-8).
