@@ -19,6 +19,7 @@
 //! [`arena_terms`]: https://crates.io/crates/arena-terms
 //! [`aslr`]: https://crates.io/crates/parlex-gen
 
+use crate::encoding::Encoding;
 use crate::{TermLexer, TermToken, TokenID, Value};
 use arena_terms::{Arena, Assoc, Fixity, MAX_OPER_PREC, MIN_OPER_PREC, Term, View};
 use parlex::{
@@ -747,12 +748,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermTokenParser, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermTokenParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
-/// let mut parser = TermTokenParser::try_new(input).unwrap();
+/// let mut parser = TermTokenParser::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 4);
 /// ```
@@ -785,8 +786,8 @@ where
     /// # Errors
     /// Returns an error if the lexer context cannot be initialized
     /// or if the generated parser tables fail to load.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
-        let lexer = TermLexer::try_new(input)?;
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
+        let lexer = TermLexer::try_new(input, encoding)?;
         let driver = TermParserDriver {
             _marker: PhantomData,
             terms: Vec::new(),
@@ -805,15 +806,16 @@ where
 /// # Parameters
 /// - `arena`: Arena allocator used for constructing term structures.
 /// - `defs_input`: Input byte iterator yielding the operator definition terms.
+/// - `encoding`: Input encoding of the definitions stream.
 ///
 /// # Errors
 /// Returns an error if parsing the operator term list fails or produces
 /// an invalid operator specification.
-pub fn define_opers<I>(arena: &mut Arena, defs_input: I) -> Result<(), ParlexError>
+pub fn define_opers<I>(arena: &mut Arena, defs_input: I, encoding: Encoding) -> Result<(), ParlexError>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
-    let mut defs_parser = TermParser::try_new(defs_input)?;
+    let mut defs_parser = TermParser::try_new(defs_input, encoding)?;
     while let Some(term) = defs_parser.try_next_with_context(arena)? {
         arena
             .define_opers(term)
@@ -916,12 +918,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermParser, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
-/// let mut parser = TermParser::try_new(input).unwrap();
+/// let mut parser = TermParser::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 4);
 /// ```
@@ -954,8 +956,8 @@ where
     /// # Errors
     /// Returns an error if the lexer context cannot be initialized
     /// or if the generated parser tables fail to load.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
-        let parser: TermTokenParser<I> = TermTokenParser::try_new(input)?;
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
+        let parser: TermTokenParser<I> = TermTokenParser::try_new(input, encoding)?;
         Ok(Self { parser })
     }
 }
@@ -1039,10 +1041,10 @@ op(not(x),prefix,800,right),
 
     fn parse(arena: &mut Arena, defs: Option<&str>, s: &str) -> Vec<Term> {
         let input = IterInput::from(s.bytes());
-        let mut parser = TermParser::try_new(input).expect("cannot create parser");
+        let mut parser = TermParser::try_new(input, Encoding::Utf8).expect("cannot create parser");
         if let Some(defs) = defs {
             let defs_input = IterInput::from(defs.bytes());
-            define_opers(arena, defs_input).expect("cannot define ops");
+            define_opers(arena, defs_input, Encoding::Utf8).expect("cannot define ops");
         }
         let ts = parser
             .try_collect_with_context(arena)

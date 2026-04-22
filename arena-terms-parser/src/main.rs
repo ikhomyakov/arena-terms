@@ -11,7 +11,7 @@
 //! [`Arena`]: arena_terms::Arena
 
 use arena_terms::{Arena, Term};
-use arena_terms_parser::{TermTokenParser, define_opers};
+use arena_terms_parser::{Encoding, TermTokenParser, define_opers};
 use clap::{Parser as ClapParser, Subcommand};
 use parlex::{ParlexError, Token};
 use std::fs::File;
@@ -37,6 +37,9 @@ enum Commands {
         /// Input file with terms
         #[arg(short, long)]
         terms: String,
+        /// Input encoding (utf-8, us-ascii, iso-8859-1, windows-1252, raw)
+        #[arg(short, long, default_value = "utf-8")]
+        encoding: String,
     },
     /// Prints sizes
     Sizes {},
@@ -51,17 +54,22 @@ fn main() -> Result<(), ParlexError> {
         Commands::Parse {
             defs: defs_path,
             terms: terms_path,
+            encoding: encoding_name,
         } => {
+            let encoding = Encoding::from_name(&encoding_name).ok_or_else(|| ParlexError {
+                message: format!("unknown encoding: {}", encoding_name),
+                span: None,
+            })?;
             let mut arena = Arena::try_with_default_opers().unwrap();
             let input = BufReader::new(
                 File::open(&terms_path).map_err(|e| ParlexError::from_err(e, None))?,
             );
-            let mut parser = TermTokenParser::try_new(input)?;
+            let mut parser = TermTokenParser::try_new(input, encoding)?;
             if let Some(defs_path) = defs_path {
                 let defs_input = BufReader::new(
                     File::open(&defs_path).map_err(|e| ParlexError::from_err(e, None))?,
                 );
-                define_opers(&mut arena, defs_input)?;
+                define_opers(&mut arena, defs_input, encoding)?;
             }
             while let Some(token) = parser.try_next_with_context(&mut arena)? {
                 dbg!(&parser.stats());

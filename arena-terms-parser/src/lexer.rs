@@ -27,6 +27,7 @@
 //! [`OperDefs`]: crate::oper::OperDefs
 //! [`alex`]: https://crates.io/crates/parlex-gen
 
+use crate::encoding::{Encoding, transcode_to_utf8};
 use crate::{TermToken, TokenID, Value};
 use lexer_data::{LexData, Mode, Rule};
 use parlex::{Lexer, LexerData, LexerDriver, LexerStats, ParlexError, Span};
@@ -134,6 +135,9 @@ pub struct TermLexerDriver<I> {
     /// Marker to bind the driver to the input type `I` without storing it.
     _marker: PhantomData<I>,
 
+    /// Input encoding for transcoding buffer bytes to UTF-8 strings.
+    encoding: Encoding,
+
     /// Secondary buffer.
     pub buffer2: Vec<u8>,
 
@@ -222,13 +226,16 @@ where
 }
 
 #[inline]
-fn take_str<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>) -> Result<String, ParlexError>
+fn take_str<I>(
+    lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>,
+    encoding: Encoding,
+) -> Result<String, ParlexError>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
     lexer.accum_flag = false;
     let bytes = take_bytes(lexer);
-    let s = ::std::string::String::from_utf8(bytes)
+    let s = transcode_to_utf8(&bytes, encoding)
         .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
     Ok(String::from(s))
 }
@@ -250,7 +257,7 @@ impl<I> TermLexerDriver<I> {
     {
         lexer.accum_flag = false;
         let bytes = std::mem::take(&mut self.buffer2);
-        let s = std::string::String::from_utf8(bytes)
+        let s = transcode_to_utf8(&bytes, self.encoding)
             .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
         Ok(String::from(s))
     }
@@ -297,9 +304,9 @@ where
             "ACTION begin: mode {:?}, rule {:?}, buf {:?}, buf2 {:?}, label {:?}, accum {}",
             lexer.mode(),
             rule,
-            str::from_utf8(&lexer.buffer),
-            str::from_utf8(&self.buffer2),
-            str::from_utf8(&self.bin_label),
+            std::string::String::from_utf8_lossy(&lexer.buffer),
+            std::string::String::from_utf8_lossy(&self.buffer2),
+            std::string::String::from_utf8_lossy(&self.bin_label),
             lexer.accum_flag,
         );
         match rule {
@@ -371,7 +378,7 @@ where
             Rule::Func => {
                 self.nest_count += 1;
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let atom = arena.atom(&s);
                 let op_tab_idx = arena.lookup_oper(&s);
                 let op_tab = arena.get_oper(op_tab_idx);
@@ -409,7 +416,7 @@ where
                 }
             }
             Rule::Var => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 yield_term(lexer, TokenID::Var, arena.var(s), lexer.span());
             }
             Rule::Atom => {
@@ -417,7 +424,7 @@ where
                     yield_id(lexer, TokenID::Dot);
                     yield_id(lexer, TokenID::End);
                 } else {
-                    let s = take_str(lexer)?;
+                    let s = take_str(lexer, self.encoding)?;
                     let atom = arena.atom(&s);
                     let op_tab_idx = arena.lookup_oper(&s);
                     let op_tab = arena.get_oper(op_tab_idx);
@@ -430,7 +437,7 @@ where
             }
 
             Rule::DateEpoch => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.pop();
                 s.drain(0..5);
                 let s = s.trim();
@@ -740,7 +747,7 @@ where
                     self.script_curly_nest_count -= 1;
                 } else {
                     lexer.buffer.pop();
-                    let s = take_str(lexer)?;
+                    let s = take_str(lexer, self.encoding)?;
                     yield_term(lexer, TokenID::Str, arena.str(s), self.span2);
                     lexer.begin(Mode::Expr);
                 }
@@ -751,13 +758,13 @@ where
             }
             Rule::HexConst => {
                 lexer.buffer.drain(0..2);
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let val = parse_i64(s.as_str(), 16)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::BaseConst => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let (base_str, digits) = s.split_once('\'').ok_or(ParlexError {
                     message: format!("missing `'` separator"),
                     span: Some(lexer.span()),
@@ -770,14 +777,14 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharHex => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.drain(0..4);
                 let val = parse_i64(s.as_str(), 16)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharOct => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.drain(0..3);
                 let val = parse_i64(s.as_str(), 8)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
@@ -788,7 +795,7 @@ where
                 yield_term(lexer, TokenID::Int, arena.int('\n' as i64), lexer.span());
             }
             Rule::CharNotBackslash => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.drain(0..2);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -797,7 +804,7 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharCtrl => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.drain(0..4);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -854,7 +861,7 @@ where
                 );
             }
             Rule::CharAny => {
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.drain(0..3);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -863,19 +870,19 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::OctConst => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let val = parse_i64(s.as_str(), 8)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::DecConst => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let val = parse_i64(s.as_str(), 10)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::FPConst => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 let val: f64 = s
                     .parse()
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
@@ -990,19 +997,19 @@ where
             Rule::StrDoubleQuote => {
                 lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 yield_term(lexer, TokenID::Str, arena.str(s), lexer.span());
             }
             Rule::AtomSingleQuote => {
                 lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 yield_term(lexer, TokenID::Atom, arena.atom(s), lexer.span());
             }
             Rule::AtomLeftParen => {
                 lexer.begin(Mode::Expr);
                 self.nest_count += 1;
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.truncate(s.len() - 2);
                 yield_term(lexer, TokenID::Func, arena.atom(s), lexer.span());
             }
@@ -1011,7 +1018,7 @@ where
                 lexer.begin(Mode::Expr);
                 self.nest_count += 1;
                 self.curly_nest_count += 1;
-                let mut s = take_str(lexer)?;
+                let mut s = take_str(lexer, self.encoding)?;
                 s.pop();
                 yield_term(lexer, TokenID::Str, arena.str(s), lexer.span());
                 let op_tab_idx = arena.lookup_oper("++");
@@ -1028,7 +1035,7 @@ where
                 // New line
             }
             Rule::Error => {
-                let s = take_str(lexer)?;
+                let s = take_str(lexer, self.encoding)?;
                 return Err(ParlexError {
                     message: format!("error on lexeme {:?}", s),
                     span: Some(lexer.span()),
@@ -1050,9 +1057,9 @@ where
             "ACTION end:   mode {:?}, rule {:?}, buf {:?}, buf2 {:?}, label {:?}, accum {}",
             lexer.mode(),
             rule,
-            str::from_utf8(&lexer.buffer),
-            str::from_utf8(&self.buffer2),
-            str::from_utf8(&self.bin_label),
+            std::string::String::from_utf8_lossy(&lexer.buffer),
+            std::string::String::from_utf8_lossy(&self.buffer2),
+            std::string::String::from_utf8_lossy(&self.bin_label),
             lexer.accum_flag,
         );
 
@@ -1096,12 +1103,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermLexer, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermLexer, TokenID, Value};
 /// # use arena_terms::{Arena};
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::new();
 /// let input = IterInput::from("hello\n +\n world\n\n123".bytes());
-/// let mut lexer = TermLexer::try_new(input).unwrap();
+/// let mut lexer = TermLexer::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = lexer.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 5);
 /// ```
@@ -1155,9 +1162,10 @@ where
     /// # Errors
     /// Returns a [`LexerError`] if the lexer cannot be constructed from the
     /// given input and operatir table.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
         let driver = TermLexerDriver {
             _marker: PhantomData,
+            encoding,
             nest_count: 0,
             comment_nest_count: 0,
             curly_nest_count: 0,
@@ -1228,7 +1236,7 @@ mod tests {
 
     fn lex(arena: &mut Arena, s: &str) -> Vec<TermToken> {
         let input = IterInput::from(s.bytes());
-        let mut lexer = TermLexer::try_new(input).expect("cannot create lexer");
+        let mut lexer = TermLexer::try_new(input, Encoding::Utf8).expect("cannot create lexer");
         lexer.try_collect_with_context(arena).expect("lexer error")
     }
 

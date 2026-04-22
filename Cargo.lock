@@ -100,11 +100,12 @@ dependencies = [
  "arena-terms",
  "chrono",
  "clap",
+ "encoding_rs",
  "env_logger",
  "hex",
  "include_bytes_aligned",
  "log",
- "parlex",
+ "parlex 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parlex-gen",
  "smartstring",
  "thiserror",
@@ -223,6 +224,15 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "encoding_rs"
+version = "0.8.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "env_filter"
@@ -473,13 +483,25 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
 name = "parlex"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "env_logger",
  "hex",
  "log",
  "regex-automata 0.4.11",
- "regex-syntax 0.8.6",
+ "smartstring",
+ "thiserror",
+ "try-next",
+]
+
+[[package]]
+name = "parlex"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1addaadfd172f782a26f8b2b9fdf48a32fe065ba4b8f2541abce693c6c7a8e8b"
+dependencies = [
+ "hex",
+ "log",
+ "regex-automata 0.4.11",
  "smartstring",
  "thiserror",
  "try-next",
@@ -487,21 +509,16 @@ dependencies = [
 
 [[package]]
 name = "parlex-gen"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chumsky",
  "clap",
- "env_logger",
- "hex",
- "log",
  "logos",
  "once_cell",
- "parlex",
+ "parlex 0.4.0",
  "regex",
  "regex-automata 0.4.11",
- "regex-syntax 0.8.6",
- "smartstring",
 ]
 
 [[package]]
@@ -762,7 +779,9 @@ dependencies = [
 
 [[package]]
 name = "try-next"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0f12afa31d1b17de5c0126eab171fd09d74bcbd6f01d47368fa5d3bedea331d"
 
 [[package]]
 name = "unicode-ident"
