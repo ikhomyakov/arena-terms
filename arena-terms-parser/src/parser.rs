@@ -1113,6 +1113,35 @@ op(not(x),prefix,800,right),
         );
     }
 
+    /// Prefix operator applied to an interpolated string.
+    ///
+    /// `-` at prec 800 (prefix, right-assoc) binds tighter than `++` at 500.
+    /// Without outer parens, `- "a{xx}b"` would parse as `(-"a") ++ xx ++ "b"`,
+    /// applying the minus only to the first string piece. The outer parens
+    /// ensure the minus applies to the entire interpolated string:
+    ///   - ("a" ++ xx ++ "b")
+    #[test]
+    fn prefix_op_on_interpolated_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, Some(SAMPLE_DEFS), r#"- "a{xx}b" ."#);
+        assert_eq!(ts.len(), 1);
+        let s = format!("{}", ts[0].display(arena));
+        // Minus applies to the whole interpolated string, not just "a"
+        assert_eq!(s, r#"'-'('++'('++'("a", xx), "b"))"#);
+    }
+
+    /// Prefix operator on a bare (non-interpolated) string also works —
+    /// the outer `( STR )` unwraps so the prefix applies directly.
+    #[test]
+    fn prefix_op_on_bare_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#"- "hello" ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(format!("{}", ts[0].display(arena)), r#"'-'("hello")"#);
+    }
+
     #[test]
     #[should_panic]
     fn missing_ops() {
