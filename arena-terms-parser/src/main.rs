@@ -10,12 +10,12 @@
 //! [`parser_oper_defs`]: arena_terms_parser::parser::parser_oper_defs
 //! [`Arena`]: arena_terms::Arena
 
-use arena_terms::{Arena, Term};
-use arena_terms_parser::{Encoding, TermTokenParser, define_opers};
+use arena_terms::{Arena, Encoding, Term};
+use arena_terms_parser::{TermTokenParser, define_opers};
 use clap::{Parser as ClapParser, Subcommand};
 use parlex::{ParlexError, Token};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{self, BufReader, Read, Write};
 use std::mem;
 use try_next::TryNextWithContext;
 
@@ -37,12 +37,47 @@ enum Commands {
         /// Input file with terms
         #[arg(short, long)]
         terms: String,
-        /// Input encoding (utf-8, us-ascii, iso-8859-1, windows-1252)
+        /// Input encoding (any WHATWG/IANA charset name)
         #[arg(short, long, default_value = "utf-8")]
         encoding: String,
     },
+    /// Decodes bytes from a given encoding to UTF-8
+    Decode {
+        /// Source encoding
+        #[arg(short = 'f', long)]
+        from: String,
+        /// Input file (stdin if omitted)
+        #[arg(short, long)]
+        input: Option<String>,
+    },
+    /// Encodes UTF-8 text into a given encoding
+    Encode {
+        /// Target encoding
+        #[arg(short = 't', long)]
+        to: String,
+        /// Input file (stdin if omitted)
+        #[arg(short, long)]
+        input: Option<String>,
+    },
     /// Prints sizes
     Sizes {},
+}
+
+fn read_input(path: Option<&str>) -> Result<Vec<u8>, ParlexError> {
+    let mut buf = Vec::new();
+    match path {
+        Some(p) => {
+            File::open(p)
+                .and_then(|mut f| f.read_to_end(&mut buf))
+                .map_err(|e| ParlexError::from_err(e, None))?;
+        }
+        None => {
+            io::stdin()
+                .read_to_end(&mut buf)
+                .map_err(|e| ParlexError::from_err(e, None))?;
+        }
+    }
+    Ok(buf)
 }
 
 fn main() -> Result<(), ParlexError> {
@@ -81,6 +116,40 @@ fn main() -> Result<(), ParlexError> {
                     None => println!("None at {:?}", span),
                 }
             }
+        }
+        Commands::Decode {
+            from: encoding_name,
+            input,
+        } => {
+            let encoding = Encoding::from_name(&encoding_name).ok_or_else(|| ParlexError {
+                message: format!("unknown encoding: {}", encoding_name),
+                span: None,
+            })?;
+            let bytes = read_input(input.as_deref())?;
+            let s = encoding
+                .decode(&bytes)
+                .map_err(|e| ParlexError::from_err(e, None))?;
+            io::stdout()
+                .write_all(s.as_bytes())
+                .map_err(|e| ParlexError::from_err(e, None))?;
+        }
+        Commands::Encode {
+            to: encoding_name,
+            input,
+        } => {
+            let encoding = Encoding::from_name(&encoding_name).ok_or_else(|| ParlexError {
+                message: format!("unknown encoding: {}", encoding_name),
+                span: None,
+            })?;
+            let bytes = read_input(input.as_deref())?;
+            let s = std::str::from_utf8(&bytes)
+                .map_err(|e| ParlexError::from_err(e, None))?;
+            let encoded = encoding
+                .encode(s)
+                .map_err(|e| ParlexError::from_err(e, None))?;
+            io::stdout()
+                .write_all(&encoded)
+                .map_err(|e| ParlexError::from_err(e, None))?;
         }
         Commands::Sizes {} => {
             println!("Size of Term: {}", mem::size_of::<Term>());
