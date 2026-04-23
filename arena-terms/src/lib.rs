@@ -69,7 +69,7 @@ mod view;
 
 pub use arena::{Arena, ArenaID, ArenaStats, EpochID, MAX_LIVE_EPOCHS};
 pub use display::TermDisplay;
-pub use encoding::{Encoding, transcode_to_utf8};
+pub use encoding::Encoding;
 pub(crate) use error::InternalTermError;
 pub use error::TermError;
 pub use oper::{

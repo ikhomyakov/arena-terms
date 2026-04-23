@@ -42,7 +42,7 @@ mod lexer;
 mod parser;
 mod token;
 
-pub use encoding::{Encoding, transcode_to_utf8};
+pub use encoding::Encoding;
 pub use lexer::{TermLexer, TermLexerDriver};
 pub use parser::parser_data::TokenID;
 pub use parser::{TermParser, TermParserDriver, TermTokenParser, define_opers};

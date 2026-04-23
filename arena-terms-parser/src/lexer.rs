@@ -27,7 +27,7 @@
 //! [`OperDefs`]: crate::oper::OperDefs
 //! [`alex`]: https://crates.io/crates/parlex-gen
 
-use crate::encoding::{Encoding, transcode_to_utf8};
+use crate::encoding::Encoding;
 use crate::{TermToken, TokenID, Value};
 use lexer_data::{LexData, Mode, Rule};
 use parlex::{Lexer, LexerData, LexerDriver, LexerStats, ParlexError, Span};
@@ -232,7 +232,7 @@ impl<I> TermLexerDriver<I> {
         I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
     {
         let bytes = self.take_bytes(lexer);
-        let s = transcode_to_utf8(&bytes, self.encoding)
+        let s = self.encoding.decode(&bytes)
             .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
         Ok(String::from(s))
     }
@@ -252,7 +252,7 @@ impl<I> TermLexerDriver<I> {
         I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
     {
         let bytes = self.take_bytes2(lexer);
-        let s = transcode_to_utf8(&bytes, self.encoding)
+        let s = self.encoding.decode(&bytes)
             .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
         Ok(String::from(s))
     }
