@@ -884,6 +884,12 @@ where
                 yield_term(lexer, TokenID::Real, arena.real(val), lexer.span());
             }
             Rule::DoubleQuote => {
+                // Wrap the whole string in `( ... )` to match legacy emission.
+                // This isolates interpolated strings from surrounding operators
+                // at the same precedence as `++` but with different associativity.
+                // For bare strings, the unary tuple is unwrapped by the parser.
+                self.nest_count += 1;
+                yield_id(lexer, TokenID::LeftParen);
                 lexer.begin(Mode::Str);
                 lexer.clear();
                 lexer.accum();
@@ -994,6 +1000,9 @@ where
                 lexer.buffer.pop();
                 let s = self.take_str(lexer)?;
                 yield_term(lexer, TokenID::Str, arena.str(s), lexer.span());
+                // Close the outer wrap opened by `DoubleQuote`.
+                self.nest_count -= 1;
+                yield_id(lexer, TokenID::RightParen);
             }
             Rule::AtomSingleQuote => {
                 lexer.begin(Mode::Expr);
@@ -1408,15 +1417,18 @@ mod tests {
             "/* single [ ( { /* line */ comment */\n\"hello\" {hello} text{5:hello} text{e:hello:e} text{e:h:e e:e:e 2:ll e:o:e} text{\ne\nhello\ne}",
         );
         dbg!(&ts);
-        assert!(ts.len() == 7);
-        assert!(matches!(
-            Term::try_from(ts[0].value.clone())
-                .unwrap()
-                .view(&arena)
-                .unwrap(),
-            View::Str(_)
-        ));
-        assert!(ts.iter().take(ts.len() - 1).all(|t| {
+        // "hello" emits ( STR ), so we get 6 string-bearing tokens + paren pair + End.
+        // Token sequence: ( STR(hello) ) STR(hello) STR(hello) STR(hello) STR(hello) STR(hello) End
+        assert!(ts.len() == 9);
+        // Filter to just tokens that carry a Str term.
+        let strs: Vec<&TermToken> = ts
+            .iter()
+            .filter(|t| {
+                matches!(t.token_id, TokenID::Str)
+            })
+            .collect();
+        assert_eq!(strs.len(), 6);
+        assert!(strs.iter().all(|t| {
             match Term::try_from(t.value.clone())
                 .unwrap()
                 .view(&arena)
@@ -1441,10 +1453,13 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
         let arena = &mut Arena::new();
         let ts = lex(arena, "\"aaa{1 + 2}bbb{3 * 4}ccc\"");
-        assert_eq!(ts.len(), 18);
-        let t0: Term = ts[0].value.clone().try_into().unwrap();
-        let t1: Term = ts[8].value.clone().try_into().unwrap();
-        let t2: Term = ts[16].value.clone().try_into().unwrap();
+        // 20 tokens: ( STR(aaa) ++ ( 1 + 2 ) ++ STR(bbb) ++ ( 3 * 4 ) ++ STR(ccc) ) End
+        assert_eq!(ts.len(), 20);
+        assert_eq!(ts[0].token_id, TokenID::LeftParen);
+        assert_eq!(ts[18].token_id, TokenID::RightParen);
+        let t0: Term = ts[1].value.clone().try_into().unwrap();
+        let t1: Term = ts[9].value.clone().try_into().unwrap();
+        let t2: Term = ts[17].value.clone().try_into().unwrap();
         assert_eq!(t0.unpack_str(arena).unwrap(), "aaa");
         assert_eq!(t1.unpack_str(arena).unwrap(), "bbb");
         assert_eq!(t2.unpack_str(arena).unwrap(), "ccc");
@@ -1455,8 +1470,9 @@ mod tests {
     fn string_preserves_lf() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"hello\nworld\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        // 4 tokens: ( STR ) End
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
     }
 
@@ -1465,8 +1481,8 @@ mod tests {
     fn string_normalizes_crlf_to_lf() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"hello\r\nworld\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
     }
 
@@ -1475,8 +1491,8 @@ mod tests {
     fn string_preserves_bare_cr() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"hello\rworld\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "hello\rworld");
     }
 
@@ -1515,8 +1531,8 @@ mod tests {
     fn string_preserves_cr_at_start() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"\rhello\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "\rhello");
     }
 
@@ -1525,8 +1541,8 @@ mod tests {
     fn string_normalizes_crlf_at_start() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"\r\nhello\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "\nhello");
     }
 
@@ -1535,8 +1551,8 @@ mod tests {
     fn string_normalizes_multiple_crlf() {
         let mut arena = Arena::new();
         let ts = lex(&mut arena, "\"a\r\nb\r\nc\"");
-        assert_eq!(ts.len(), 2);
-        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "a\nb\nc");
     }
 }

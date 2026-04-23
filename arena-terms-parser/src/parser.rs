@@ -1068,11 +1068,13 @@ op(not(x),prefix,800,right),
     /// String interpolation with a surrounding tighter operator.
     ///
     /// `+` at precedence 380 binds tighter than `++` at 500 (default).
-    /// Legacy emits outer parens around the interpolated string:
+    /// Both legacy and arena-terms emit outer parens around the interpolated string:
     ///   "a{x}b" + 1  →  ("a" ++ (x) ++ "b") + 1
-    /// If arena-terms omits outer parens, it would instead parse as:
-    ///   "a" ++ (x) ++ ("b" + 1)
-    /// which groups the `+ 1` with the trailing string piece.
+    ///
+    /// Without outer parens, precedence resolution would still produce the same
+    /// parse tree here (because `+` binds tighter, it gets reduced first inside
+    /// the `++` chain), but the outer parens ensure correctness in edge cases
+    /// with mixed-associativity same-precedence operators.
     #[test]
     fn string_interpolation_outer_paren_isolation() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -1080,9 +1082,35 @@ op(not(x),prefix,800,right),
         let ts = parse(arena, Some(SAMPLE_DEFS), r#""a{xx}b" + 1 ."#);
         assert_eq!(ts.len(), 1);
         let s = format!("{}", ts[0].display(arena));
-        // Expected (legacy): the whole interpolated string is one operand of `+`
         //   '+'('++'('++'("a", xx), "b"), 1)
         assert_eq!(s, r#"'+'('++'('++'("a", xx), "b"), 1)"#);
+    }
+
+    /// A bare non-interpolated string `"hello"` is wrapped as `( "hello" )` by
+    /// the lexer, but the parser unwraps unary tuples so the resulting term is
+    /// just `"hello"` (no surrounding structure).
+    #[test]
+    fn bare_string_unwraps_to_plain_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#""hello" ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(format!("{}", ts[0].display(arena)), r#""hello""#);
+    }
+
+    /// Bare strings used as function arguments: `foo("hello", "world")`.
+    /// Despite the lexer emitting outer parens around each string, they unwrap
+    /// correctly as distinct arguments.
+    #[test]
+    fn bare_strings_as_func_args() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#"foo("hello", "world") ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(
+            format!("{}", ts[0].display(arena)),
+            r#"foo("hello", "world")"#
+        );
     }
 
     #[test]
