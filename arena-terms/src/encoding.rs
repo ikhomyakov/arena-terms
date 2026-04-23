@@ -13,7 +13,7 @@ pub enum Encoding {
     #[default]
     Utf8,
     Ascii,
-    Latin1,
+    Iso8859_1,
     // Western
     Windows1252,
     Iso8859_15,
@@ -80,7 +80,7 @@ impl Encoding {
         match lower.as_str() {
             "utf-8" | "utf8" => Some(Self::Utf8),
             "us-ascii" | "ascii" | "iso-ir-6" => Some(Self::Ascii),
-            "iso-8859-1" | "latin1" | "latin-1" | "iso_8859-1" | "l1" => Some(Self::Latin1),
+            "iso-8859-1" | "latin1" | "latin-1" | "iso_8859-1" | "l1" => Some(Self::Iso8859_1),
             _ => {
                 let enc_rs = encoding_rs::Encoding::for_label(lower.as_bytes())?;
                 Self::from_encoding_rs(enc_rs)
@@ -93,7 +93,7 @@ impl Encoding {
         match self {
             Self::Utf8 => "utf-8",
             Self::Ascii => "us-ascii",
-            Self::Latin1 => "iso-8859-1",
+            Self::Iso8859_1 => "iso-8859-1",
             _ => self.to_encoding_rs().name(),
         }
     }
@@ -102,7 +102,7 @@ impl Encoding {
     fn to_encoding_rs(&self) -> &'static encoding_rs::Encoding {
         match self {
             Self::Utf8 => encoding_rs::UTF_8,
-            Self::Ascii | Self::Latin1 => encoding_rs::WINDOWS_1252,
+            Self::Ascii | Self::Iso8859_1 => encoding_rs::WINDOWS_1252,
             Self::Windows1252 => encoding_rs::WINDOWS_1252,
             Self::Iso8859_15 => encoding_rs::ISO_8859_15,
             Self::Macintosh => encoding_rs::MACINTOSH,
@@ -194,7 +194,7 @@ impl Encoding {
     /// # Examples
     /// ```
     /// # use arena_terms::Encoding;
-    /// let s = Encoding::Latin1.decode(&[0x63, 0x61, 0x66, 0xE9]).unwrap();
+    /// let s = Encoding::Iso8859_1.decode(&[0x63, 0x61, 0x66, 0xE9]).unwrap();
     /// assert_eq!(s, "café");
     /// ```
     pub fn decode(&self, bytes: &[u8]) -> Result<String, TermError> {
@@ -212,7 +212,7 @@ impl Encoding {
                 }
                 Ok(unsafe { String::from_utf8_unchecked(bytes.to_vec()) })
             }
-            Self::Latin1 => {
+            Self::Iso8859_1 => {
                 let mut out = String::with_capacity(bytes.len());
                 for &b in bytes {
                     out.push(b as char);
@@ -236,7 +236,7 @@ impl Encoding {
     /// # Examples
     /// ```
     /// # use arena_terms::Encoding;
-    /// let bytes = Encoding::Latin1.encode("café").unwrap();
+    /// let bytes = Encoding::Iso8859_1.encode("café").unwrap();
     /// assert_eq!(bytes, vec![0x63, 0x61, 0x66, 0xE9]);
     /// ```
     pub fn encode(&self, s: &str) -> Result<Vec<u8>, TermError> {
@@ -250,7 +250,7 @@ impl Encoding {
                 }
                 Ok(s.as_bytes().to_vec())
             }
-            Self::Latin1 => {
+            Self::Iso8859_1 => {
                 let mut out = Vec::with_capacity(s.len());
                 for ch in s.chars() {
                     let cp = ch as u32;
@@ -294,8 +294,8 @@ mod tests {
     fn from_name_case_insensitive() {
         assert_eq!(Encoding::from_name("UTF-8"), Some(Encoding::Utf8));
         assert_eq!(Encoding::from_name("utf8"), Some(Encoding::Utf8));
-        assert_eq!(Encoding::from_name("ISO-8859-1"), Some(Encoding::Latin1));
-        assert_eq!(Encoding::from_name("latin1"), Some(Encoding::Latin1));
+        assert_eq!(Encoding::from_name("ISO-8859-1"), Some(Encoding::Iso8859_1));
+        assert_eq!(Encoding::from_name("latin1"), Some(Encoding::Iso8859_1));
         assert_eq!(Encoding::from_name("Windows-1252"), Some(Encoding::Windows1252));
         assert_eq!(Encoding::from_name("us-ascii"), Some(Encoding::Ascii));
         assert_eq!(Encoding::from_name("unknown"), None);
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn decode_latin1() {
         assert_eq!(
-            Encoding::Latin1.decode(&[0x63, 0x61, 0x66, 0xE9]).unwrap(),
+            Encoding::Iso8859_1.decode(&[0x63, 0x61, 0x66, 0xE9]).unwrap(),
             "café"
         );
     }
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn decode_latin1_full_range() {
         let bytes: Vec<u8> = (0u8..=255).collect();
-        let s = Encoding::Latin1.decode(&bytes).unwrap();
+        let s = Encoding::Iso8859_1.decode(&bytes).unwrap();
         assert_eq!(s.chars().count(), 256);
         assert_eq!(s.chars().last(), Some('\u{FF}'));
     }
@@ -387,14 +387,14 @@ mod tests {
     #[test]
     fn encode_latin1() {
         assert_eq!(
-            Encoding::Latin1.encode("café").unwrap(),
+            Encoding::Iso8859_1.encode("café").unwrap(),
             vec![0x63, 0x61, 0x66, 0xE9]
         );
     }
 
     #[test]
     fn encode_latin1_out_of_range() {
-        assert!(Encoding::Latin1.encode("Ā").is_err());
+        assert!(Encoding::Iso8859_1.encode("Ā").is_err());
     }
 
     #[test]
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn decode_encode_roundtrip() {
-        for enc in [Encoding::Utf8, Encoding::Ascii, Encoding::Latin1, Encoding::Windows1252] {
+        for enc in [Encoding::Utf8, Encoding::Ascii, Encoding::Iso8859_1, Encoding::Windows1252] {
             let original = b"hello";
             let s = enc.decode(original).unwrap();
             let bytes = enc.encode(&s).unwrap();
@@ -426,8 +426,8 @@ mod tests {
     #[test]
     fn encode_decode_roundtrip_latin1() {
         let original = "café";
-        let bytes = Encoding::Latin1.encode(original).unwrap();
-        let s = Encoding::Latin1.decode(&bytes).unwrap();
+        let bytes = Encoding::Iso8859_1.encode(original).unwrap();
+        let s = Encoding::Iso8859_1.decode(&bytes).unwrap();
         assert_eq!(s, original);
     }
 
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn name_roundtrip() {
         for enc in [
-            Encoding::Utf8, Encoding::Ascii, Encoding::Latin1, Encoding::Windows1252,
+            Encoding::Utf8, Encoding::Ascii, Encoding::Iso8859_1, Encoding::Windows1252,
             Encoding::Windows1251, Encoding::Koi8R, Encoding::ShiftJis, Encoding::EucJp,
             Encoding::Gbk, Encoding::Big5, Encoding::EucKr, Encoding::Utf16Be,
         ] {

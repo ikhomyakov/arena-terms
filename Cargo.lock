@@ -87,6 +87,7 @@ name = "arena-terms"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "encoding_rs",
  "indexmap",
  "rand",
  "smartstring",
@@ -100,7 +101,6 @@ dependencies = [
  "arena-terms",
  "chrono",
  "clap",
- "encoding_rs",
  "env_logger",
  "hex",
  "include_bytes_aligned",
