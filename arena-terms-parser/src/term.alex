@@ -91,7 +91,7 @@ BinLabelEnd: <BinLabel> (?::|{{NEW_LINE}}){{LABEL}}
 BinLabelNLChar: <BinLabel> \n
 BinLabelAnyChar: <BinLabel> .
 LeftBrace: <Expr> \{
-ScriptNotBraces: <Script> [^{}]+
+ScriptNotBraces: <Script> [^{}\r\n]+
 ScriptLeftBrace: <Script> \{
 ScriptRightBrace: <Script> \}
 ScriptNewLine: <Script> {{NEW_LINE}}

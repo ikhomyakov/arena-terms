@@ -634,10 +634,19 @@ where
                 }
             }
             r @ (Rule::BinCountNLChar | Rule::TextCountNewLine) => {
-                // New line
+                // New line.
+                // - bin{N:...}: preserve raw bytes verbatim (including \r\n).
+                // - text{N:...}: normalize \r\n → \n to match legacy behavior
+                //   (legacy's `{NL}` rule appends a single "\n" regardless).
+                // Accumulation is on in these modes, so the matched newline is
+                // at the tail of `lexer.buffer`. Check the last two bytes.
                 self.span2.merge(lexer.span_ref());
-                if lexer.buffer[0] == b'\r' {
-                    lexer.buffer.remove(0);
+                if r == Rule::TextCountNewLine {
+                    let len = lexer.buffer.len();
+                    if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                        lexer.buffer.truncate(len - 2);
+                        lexer.buffer.push(b'\n');
+                    }
                 }
                 self.bin_count -= 1;
                 if self.bin_count == 0 {
@@ -748,8 +757,14 @@ where
                 }
             }
             Rule::ScriptNewLine => {
-                // New line
+                // Normalize \r\n → \n inside script blocks `{...}` (match legacy).
+                // Accumulation is on, so the matched newline is at the tail of the buffer.
                 self.span2.merge(lexer.span_ref());
+                let len = lexer.buffer.len();
+                if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                    lexer.buffer.truncate(len - 2);
+                    lexer.buffer.push(b'\n');
+                }
             }
             Rule::HexConst => {
                 lexer.buffer.drain(0..2);
@@ -1544,6 +1559,76 @@ mod tests {
         assert_eq!(ts.len(), 4);
         let t: Term = ts[1].value.clone().try_into().unwrap();
         assert_eq!(t.unpack_str(&arena).unwrap(), "\nhello");
+    }
+
+    /// Script block `{...}` normalizes CRLF to LF — matches legacy.
+    #[test]
+    fn script_block_normalizes_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "{foo\r\nbar}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "foo\nbar");
+    }
+
+    /// Script block preserves bare LF.
+    #[test]
+    fn script_block_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "{foo\nbar}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "foo\nbar");
+    }
+
+    /// bin{N:...} preserves ALL raw bytes including CRLF sequences.
+    /// Legacy: `bin{2:\r\n}` → [13, 10] (2 bytes, `\r\n` preserved).
+    #[test]
+    fn bin_counted_preserves_leading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "bin{2:\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        match t.view(&arena).unwrap() {
+            View::Bin(bytes) => assert_eq!(bytes, &[0x0D, 0x0A]),
+            v => panic!("expected Bin, got {:?}", v),
+        }
+    }
+
+    /// bin{N:A\r\n} — CRLF after an ASCII byte preserved verbatim.
+    #[test]
+    fn bin_counted_preserves_nonleading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "bin{3:A\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        match t.view(&arena).unwrap() {
+            View::Bin(bytes) => assert_eq!(bytes, &[0x41, 0x0D, 0x0A]),
+            v => panic!("expected Bin, got {:?}", v),
+        }
+    }
+
+    /// text{N:...} normalizes CRLF to LF — matches legacy.
+    /// Legacy's `{NL}` rule always appends a single "\n".
+    /// `text{1:\r\n}` → "\n" (1 char).
+    #[test]
+    fn text_counted_normalizes_leading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "text{1:\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\n");
+    }
+
+    /// text{N:A\r\n} — CRLF after an ASCII byte normalizes to LF.
+    /// Legacy `text{2:A\r\n}` → "A\n" (2 chars).
+    #[test]
+    fn text_counted_normalizes_nonleading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "text{2:A\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "A\n");
     }
 
     /// Multiple CRLF sequences all normalize to LF.
