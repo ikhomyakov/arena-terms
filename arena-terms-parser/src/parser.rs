@@ -1065,6 +1065,26 @@ op(not(x),prefix,800,right),
         assert_eq!(s, "'<='('*'(2, 2), 5)");
     }
 
+    /// String interpolation with a surrounding tighter operator.
+    ///
+    /// `+` at precedence 380 binds tighter than `++` at 500 (default).
+    /// Legacy emits outer parens around the interpolated string:
+    ///   "a{x}b" + 1  →  ("a" ++ (x) ++ "b") + 1
+    /// If arena-terms omits outer parens, it would instead parse as:
+    ///   "a" ++ (x) ++ ("b" + 1)
+    /// which groups the `+ 1` with the trailing string piece.
+    #[test]
+    fn string_interpolation_outer_paren_isolation() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, Some(SAMPLE_DEFS), r#""a{xx}b" + 1 ."#);
+        assert_eq!(ts.len(), 1);
+        let s = format!("{}", ts[0].display(arena));
+        // Expected (legacy): the whole interpolated string is one operand of `+`
+        //   '+'('++'('++'("a", xx), "b"), 1)
+        assert_eq!(s, r#"'+'('++'('++'("a", xx), "b"), 1)"#);
+    }
+
     #[test]
     #[should_panic]
     fn missing_ops() {
