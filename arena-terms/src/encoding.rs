@@ -71,10 +71,23 @@ pub enum Encoding {
 }
 
 impl Encoding {
-    /// Parses an encoding name (case-insensitive) into an [`Encoding`].
-    ///
-    /// Accepts WHATWG/IANA names and common aliases as recognized by
-    /// `encoding_rs::Encoding::for_label()`, plus `"ascii"` and `"latin1"`.
+    pub const ALL: &[Encoding] = &[
+        Self::Utf8, Self::Ascii,
+        Self::Iso8859_1, Self::Iso8859_2, Self::Iso8859_3, Self::Iso8859_4,
+        Self::Iso8859_5, Self::Iso8859_6, Self::Iso8859_7, Self::Iso8859_8,
+        Self::Iso8859_8I, Self::Iso8859_9, Self::Iso8859_10, Self::Iso8859_13,
+        Self::Iso8859_14, Self::Iso8859_15, Self::Iso8859_16,
+        Self::Windows874, Self::Windows1250, Self::Windows1251, Self::Windows1252,
+        Self::Windows1253, Self::Windows1254, Self::Windows1255, Self::Windows1256,
+        Self::Windows1257, Self::Windows1258,
+        Self::Koi8R, Self::Koi8U, Self::Ibm866,
+        Self::Macintosh, Self::XMacCyrillic,
+        Self::ShiftJis, Self::EucJp, Self::Iso2022Jp,
+        Self::Gbk, Self::Gb18030, Self::Big5,
+        Self::EucKr,
+        Self::Utf16Be, Self::Utf16Le,
+    ];
+
     pub fn from_name(name: &str) -> Option<Self> {
         let lower = name.trim().to_ascii_lowercase();
         match lower.as_str() {
