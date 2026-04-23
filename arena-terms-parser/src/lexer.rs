@@ -1027,7 +1027,14 @@ where
                 yield_id(lexer, TokenID::LeftParen);
             }
             Rule::StrAtomNewLine => {
-                // New line
+                // Normalize \r\n → \n inside quoted strings/atoms (matches legacy behavior).
+                // The DFA pattern `\r?\n` pushed either 1 or 2 bytes to the buffer.
+                // If the last two bytes are `\r\n`, replace with a single `\n`.
+                let len = lexer.buffer.len();
+                if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                    lexer.buffer.truncate(len - 2);
+                    lexer.buffer.push(b'\n');
+                }
             }
             Rule::Error => {
                 let s = self.take_str(lexer)?;
@@ -1441,5 +1448,95 @@ mod tests {
         assert_eq!(t0.unpack_str(arena).unwrap(), "aaa");
         assert_eq!(t1.unpack_str(arena).unwrap(), "bbb");
         assert_eq!(t2.unpack_str(arena).unwrap(), "ccc");
+    }
+
+    /// String literals preserve bare LF — matches legacy behavior.
+    #[test]
+    fn string_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\nworld\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
+    }
+
+    /// String literals normalize CRLF to LF — matches legacy behavior.
+    #[test]
+    fn string_normalizes_crlf_to_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\r\nworld\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
+    }
+
+    /// String literals preserve bare CR (not followed by LF) — matches legacy behavior.
+    #[test]
+    fn string_preserves_bare_cr() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\rworld\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\rworld");
+    }
+
+    /// Quoted atoms preserve bare LF — matches legacy behavior.
+    #[test]
+    fn atom_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\nworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\nworld");
+    }
+
+    /// Quoted atoms normalize CRLF to LF — matches legacy behavior.
+    #[test]
+    fn atom_normalizes_crlf_to_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\r\nworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\nworld");
+    }
+
+    /// Quoted atoms preserve bare CR — matches legacy behavior.
+    #[test]
+    fn atom_preserves_bare_cr() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\rworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\rworld");
+    }
+
+    /// CR at the very start of a string (adjacent to opening quote) is preserved.
+    #[test]
+    fn string_preserves_cr_at_start() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"\rhello\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\rhello");
+    }
+
+    /// CRLF at the very start of a string normalizes to LF.
+    #[test]
+    fn string_normalizes_crlf_at_start() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"\r\nhello\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\nhello");
+    }
+
+    /// Multiple CRLF sequences all normalize to LF.
+    #[test]
+    fn string_normalizes_multiple_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"a\r\nb\r\nc\"");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "a\nb\nc");
     }
 }
