@@ -439,6 +439,103 @@ mod tests {
         assert_eq!(s, original);
     }
 
+    // -- Cyrillic encodings --
+
+    #[test]
+    fn decode_koi8r_cyrillic() {
+        // "Привет" in KOI8-R
+        let bytes = &[0xF0, 0xD2, 0xC9, 0xD7, 0xC5, 0xD4];
+        assert_eq!(Encoding::Koi8R.decode(bytes).unwrap(), "Привет");
+    }
+
+    #[test]
+    fn encode_koi8r_cyrillic() {
+        let bytes = Encoding::Koi8R.encode("Привет").unwrap();
+        assert_eq!(bytes, vec![0xF0, 0xD2, 0xC9, 0xD7, 0xC5, 0xD4]);
+    }
+
+    #[test]
+    fn decode_koi8u_ukrainian() {
+        // "Київ" in KOI8-U
+        let bytes = &[0xEB, 0xC9, 0xA7, 0xD7];
+        assert_eq!(Encoding::Koi8U.decode(bytes).unwrap(), "Київ");
+    }
+
+    #[test]
+    fn decode_iso8859_5_cyrillic() {
+        // "Мир" in ISO-8859-5: М=0xBC, и=0xD8, р=0xE0
+        let bytes = &[0xBC, 0xD8, 0xE0];
+        assert_eq!(Encoding::Iso8859_5.decode(bytes).unwrap(), "Мир");
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_koi8r() {
+        let original = "Здравствуйте";
+        let bytes = Encoding::Koi8R.encode(original).unwrap();
+        let s = Encoding::Koi8R.decode(&bytes).unwrap();
+        assert_eq!(s, original);
+    }
+
+    // -- CJK encodings --
+
+    #[test]
+    fn decode_gbk_chinese() {
+        // "你好" in GBK: 0xC4E3 0xBAC3
+        let bytes = &[0xC4, 0xE3, 0xBA, 0xC3];
+        assert_eq!(Encoding::Gbk.decode(bytes).unwrap(), "你好");
+    }
+
+    #[test]
+    fn encode_gbk_chinese() {
+        let bytes = Encoding::Gbk.encode("你好").unwrap();
+        assert_eq!(bytes, vec![0xC4, 0xE3, 0xBA, 0xC3]);
+    }
+
+    #[test]
+    fn decode_big5_traditional_chinese() {
+        // "世界" in Big5: 0xA5 0x40 0xAC 0xC9
+        let bytes = &[0xA5, 0x40, 0xAC, 0xC9];
+        assert_eq!(Encoding::Big5.decode(bytes).unwrap(), "世界");
+    }
+
+    #[test]
+    fn decode_euc_kr_korean() {
+        // "한글" in EUC-KR: 0xC7 0xD1 0xB1 0xDB
+        let bytes = &[0xC7, 0xD1, 0xB1, 0xDB];
+        assert_eq!(Encoding::EucKr.decode(bytes).unwrap(), "한글");
+    }
+
+    #[test]
+    fn decode_euc_jp_japanese() {
+        // "日本" in EUC-JP: 0xC6 0xFC 0xCB 0xDC
+        let bytes = &[0xC6, 0xFC, 0xCB, 0xDC];
+        assert_eq!(Encoding::EucJp.decode(bytes).unwrap(), "日本");
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_shift_jis() {
+        let original = "東京タワー";
+        let bytes = Encoding::ShiftJis.encode(original).unwrap();
+        let s = Encoding::ShiftJis.decode(&bytes).unwrap();
+        assert_eq!(s, original);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_gb18030() {
+        let original = "中文测试";
+        let bytes = Encoding::Gb18030.encode(original).unwrap();
+        let s = Encoding::Gb18030.decode(&bytes).unwrap();
+        assert_eq!(s, original);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_euc_kr() {
+        let original = "서울";
+        let bytes = Encoding::EucKr.encode(original).unwrap();
+        let s = Encoding::EucKr.decode(&bytes).unwrap();
+        assert_eq!(s, original);
+    }
+
     #[test]
     fn name_roundtrip() {
         for enc in [
