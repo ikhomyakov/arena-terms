@@ -88,6 +88,16 @@ For example, with UTF-8 input, `text{10:Игорь}` is correct (5 Cyrillic char
 while `text{5:Игорь}` will fail to parse.
 
 
+## Known Divergences from Legacy Parser
+
+* **`123e5` is accepted as a float literal.** The legacy parser requires a decimal point
+  (e.g., `1.23e5`), treating `123e5` as integer `123` followed by atom `e5`. Arena-terms
+  accepts the `DEC+EXP` form as valid, following C/Python/JSON/Rust conventions.
+
+* **Date representation.** Legacy uses Excel serial dates (double); arena-terms uses Unix
+  epoch milliseconds (i64) with extended ISO-8601 format support.
+
+
 ## Documentation
 
 For detailed API documentation, visit [docs.rs/arena-terms-parser](https://docs.rs/arena-terms-parser).
