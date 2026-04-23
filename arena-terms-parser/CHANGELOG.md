@@ -16,6 +16,10 @@
 
 * **CLI `--encoding` flag.** The `parse` subcommand accepts `--encoding` (default `utf-8`).
 
+* **CLI `decode` / `encode` commands.** Convert between any supported encoding and UTF-8:
+  `arena-terms-parser decode --from windows-1251 < input.bin`
+  `arena-terms-parser encode --to iso-8859-1 < input.txt`
+
 * **Outer parentheses around double-quoted strings** (matching legacy parser behavior).
   `"a{expr}b"` now emits `( STR ++ ( expr ) ++ STR )`, isolating the interpolated string from
   surrounding operators. For bare strings, the parser's unary-tuple unwrapping collapses them.

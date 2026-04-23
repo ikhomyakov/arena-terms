@@ -77,13 +77,22 @@ cargo build --release --bin arena-terms-parser
 Then run:
 
 ```bash
+# Parse terms
 ./target/release/arena-terms-parser parse --terms input.ax
 ./target/release/arena-terms-parser parse --encoding iso-8859-1 --terms input.ax
 ./target/release/arena-terms-parser parse --defs ops.ax --terms input.ax
+
+# Decode: bytes in source encoding → UTF-8
+./target/release/arena-terms-parser decode --from windows-1251 --input file.bin
+echo -n $'\xCF\xF0\xE8\xE2\xE5\xF2' | ./target/release/arena-terms-parser decode --from windows-1251
+
+# Encode: UTF-8 → bytes in target encoding
+echo -n 'café' | ./target/release/arena-terms-parser encode --to iso-8859-1
+./target/release/arena-terms-parser encode --to shift_jis --input japanese.txt
 ```
 
-Supported `--encoding` values: any WHATWG/IANA charset name (e.g., `utf-8`, `iso-8859-1`,
-`windows-1251`, `shift_jis`, `gbk`, `euc-kr`). Default: `utf-8`.
+All encoding names accept any WHATWG/IANA charset label (case-insensitive), including
+common aliases like `latin1`, `sjis`, `cp1251`, `chinese`, etc. Default: `utf-8`.
 
 **Note:** In `bin{N:...}` and `text{N:...}`, *N* is the number of **raw bytes**, not characters.
 For example, with UTF-8 input, `text{10:Игорь}` is correct (5 Cyrillic characters = 10 UTF-8 bytes),
