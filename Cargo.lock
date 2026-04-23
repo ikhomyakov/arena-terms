@@ -105,7 +105,7 @@ dependencies = [
  "hex",
  "include_bytes_aligned",
  "log",
- "parlex 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parlex",
  "parlex-gen",
  "smartstring",
  "thiserror",
@@ -483,21 +483,9 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
 name = "parlex"
-version = "0.4.0"
-dependencies = [
- "hex",
- "log",
- "regex-automata 0.4.11",
- "smartstring",
- "thiserror",
- "try-next",
-]
-
-[[package]]
-name = "parlex"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1addaadfd172f782a26f8b2b9fdf48a32fe065ba4b8f2541abce693c6c7a8e8b"
+checksum = "36d664e0676e10f5d67bef41683c5a4e3980bc4ecc38441c1b746da47910f458"
 dependencies = [
  "hex",
  "log",
@@ -509,14 +497,16 @@ dependencies = [
 
 [[package]]
 name = "parlex-gen"
-version = "0.4.0"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93ffa335e7acd598b5ba3c14f612d53478e765cfc2025b171d9fa635533f6178"
 dependencies = [
  "anyhow",
  "chumsky",
  "clap",
  "logos",
  "once_cell",
- "parlex 0.4.0",
+ "parlex",
  "regex",
  "regex-automata 0.4.11",
 ]
