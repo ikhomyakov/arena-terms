@@ -26,9 +26,10 @@ crate to store terms efficiently in an arena and is built on top of the
   Dynamically handles operator fixity, associativity, and precedence rules.
 
 - **Multi-encoding**
-  Supports UTF-8, US-ASCII, ISO-8859-1 (Latin-1), and Windows-1252.
-  All internal term representation is UTF-8; input bytes are transcoded automatically.
-  Binary content (`bin{...}`) always collects raw source bytes.
+  Supports all WHATWG encodings via `encoding_rs`: UTF-8, ASCII, ISO-8859-1 through 16,
+  Windows-1250 through 1258, KOI8-R/U, Shift_JIS, EUC-JP, GBK, GB18030, Big5, EUC-KR,
+  UTF-16, and more. All internal term representation is UTF-8; input bytes are transcoded
+  automatically. Binary content (`bin{...}`) always collects raw source bytes.
 
 - **Arena-backed**
   Terms are stored compactly in arenas for efficient allocation and traversal.
@@ -81,7 +82,8 @@ Then run:
 ./target/release/arena-terms-parser parse --defs ops.ax --terms input.ax
 ```
 
-Supported `--encoding` values: `utf-8` (default), `us-ascii`, `iso-8859-1`, `windows-1252`.
+Supported `--encoding` values: any WHATWG/IANA charset name (e.g., `utf-8`, `iso-8859-1`,
+`windows-1251`, `shift_jis`, `gbk`, `euc-kr`). Default: `utf-8`.
 
 **Note:** In `bin{N:...}` and `text{N:...}`, *N* is the number of **raw bytes**, not characters.
 For example, with UTF-8 input, `text{10:Игорь}` is correct (5 Cyrillic characters = 10 UTF-8 bytes),

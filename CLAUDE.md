@@ -30,7 +30,7 @@ cargo run -p arena-terms-parser -- sizes
 Two crates in a Cargo workspace (edition 2024, MSRV 1.89+):
 
 - **arena-terms/** — Core library: 16-byte copyable `Term` handles, epoch-based `Arena` allocator, borrowed `View<'a>`, operator definitions, display/formatting.
-- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, `define_opers`, and `Encoding`. Supports multiple input encodings (UTF-8, ASCII, ISO-8859-1, Windows-1252) with all internal representation in UTF-8.
+- **arena-terms-parser/** — Lexer and SLR(1) parser generated from `src/term.alex` (Alex) and `src/termx.g` (ASLR) via `parlex-gen` in `build.rs`. Provides `TermLexer`, `TermParser`, `TermParserDriver`, and `define_opers`. Supports all WHATWG input encodings via `Encoding` (from arena-terms) with all internal representation in UTF-8.
 
 ## Architecture
 

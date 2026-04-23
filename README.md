@@ -24,6 +24,7 @@ This crate provides:
 * `Arena` — an allocator that interns terms
 * `View<'a>` — a borrowed representation for inspecting terms without allocation
 * `IntoTerm` — a trait and a suite of macros (`func!`, `list!`, `tuple!`, `atom!`, `var!`, etc.) for ergonomic term construction
+* `Encoding` — decode/encode support for all WHATWG encodings (UTF-8, ISO-8859-*, Windows-125*, KOI8, Shift_JIS, GBK, Big5, EUC-KR, etc.)
 
 **Example:**
 

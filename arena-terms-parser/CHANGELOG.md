@@ -10,9 +10,9 @@
 
 ### Added
 
-* **Multi-encoding support.** New `Encoding` enum supports UTF-8, US-ASCII, ISO-8859-1 (Latin-1),
-  and Windows-1252. Input bytes are transcoded to UTF-8 via `transcode_to_utf8()`. All internal
-  term representation remains UTF-8. Binary content (`bin{...}`) always collects raw source bytes.
+* **Multi-encoding support.** `Encoding` enum (from `arena-terms`) with `decode()`/`encode()`
+  methods supports all WHATWG encodings via `encoding_rs`. All internal term representation
+  remains UTF-8. Binary content (`bin{...}`) always collects raw source bytes.
 
 * **CLI `--encoding` flag.** The `parse` subcommand accepts `--encoding` (default `utf-8`).
 
