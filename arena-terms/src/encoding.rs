@@ -13,6 +13,9 @@ pub enum Encoding {
     #[default]
     Utf8,
     Ascii,
+    // True ISO-8859-1 (Latin-1): bytes 0x80-0x9F map to Unicode control characters.
+    // This differs from Windows-1252, where 0x80-0x9F map to printable characters
+    // (€, „, ", etc.). Use Windows1252 if you need the Windows/WHATWG behavior.
     Iso8859_1,
     // Western
     Windows1252,
@@ -23,6 +26,8 @@ pub enum Encoding {
     Windows1250,
     // South European / Turkish
     Iso8859_3,
+    // ISO-8859-9 is identical to Windows-1254 (WHATWG merges them).
+    // Both kept as separate variants for naming convenience.
     Iso8859_9,
     Windows1254,
     // North European / Baltic

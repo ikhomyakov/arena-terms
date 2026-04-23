@@ -1,5 +1,17 @@
 # Release Notes
 
+## [0.6.1] — 2026-04-23
+
+### Added
+
+* **`Encoding::ALL` constant** listing all supported encodings.
+
+* **Code documentation** clarifying that `Iso8859_1` implements true Latin-1
+  (bytes 0x80-0x9F map to Unicode control chars), distinct from `Windows1252`
+  (0x80-0x9F map to printable chars like €). Also notes that `Iso8859_9` and
+  `Windows1254` are identical per WHATWG (kept as separate variants for naming
+  convenience).
+
 ## [0.6.0] — 2026-04-22
 
 ### Added
