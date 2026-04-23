@@ -39,7 +39,6 @@ arena-terms.workspace = true
 chrono.workspace = true
 include_bytes_aligned.workspace = true
 thiserror.workspace = true
-encoding_rs.workspace = true
 
 [build-dependencies]
 parlex-gen.workspace = true

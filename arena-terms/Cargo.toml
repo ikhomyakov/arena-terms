@@ -18,3 +18,4 @@ rand.workspace = true
 smartstring.workspace = true
 indexmap.workspace = true
 thiserror.workspace = true
+encoding_rs.workspace = true
