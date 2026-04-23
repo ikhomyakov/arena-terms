@@ -14,24 +14,77 @@ pub enum Encoding {
     Utf8,
     Ascii,
     Latin1,
+    // Western
     Windows1252,
+    Iso8859_15,
+    Macintosh,
+    // Central European
+    Iso8859_2,
+    Windows1250,
+    // South European / Turkish
+    Iso8859_3,
+    Iso8859_9,
+    Windows1254,
+    // North European / Baltic
+    Iso8859_4,
+    Iso8859_10,
+    Iso8859_13,
+    Windows1257,
+    // Celtic
+    Iso8859_14,
+    // Romanian
+    Iso8859_16,
+    // Cyrillic
+    Iso8859_5,
+    Windows1251,
+    Koi8R,
+    Koi8U,
+    Ibm866,
+    XMacCyrillic,
+    // Greek
+    Iso8859_7,
+    Windows1253,
+    // Hebrew
+    Iso8859_8,
+    Iso8859_8I,
+    Windows1255,
+    // Arabic
+    Iso8859_6,
+    Windows1256,
+    // Vietnamese
+    Windows1258,
+    // Thai
+    Windows874,
+    // Japanese
+    ShiftJis,
+    EucJp,
+    Iso2022Jp,
+    // Chinese
+    Gbk,
+    Gb18030,
+    Big5,
+    // Korean
+    EucKr,
+    // Unicode
+    Utf16Be,
+    Utf16Le,
 }
 
 impl Encoding {
     /// Parses an encoding name (case-insensitive) into an [`Encoding`].
     ///
-    /// Accepts WHATWG/IANA names and common aliases:
-    /// - `"utf-8"`, `"utf8"` → [`Utf8`](Encoding::Utf8)
-    /// - `"us-ascii"`, `"ascii"` → [`Ascii`](Encoding::Ascii)
-    /// - `"iso-8859-1"`, `"latin1"`, `"latin-1"` → [`Latin1`](Encoding::Latin1)
-    /// - `"windows-1252"`, `"cp1252"` → [`Windows1252`](Encoding::Windows1252)
+    /// Accepts WHATWG/IANA names and common aliases as recognized by
+    /// `encoding_rs::Encoding::for_label()`, plus `"ascii"` and `"latin1"`.
     pub fn from_name(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
+        let lower = name.trim().to_ascii_lowercase();
+        match lower.as_str() {
             "utf-8" | "utf8" => Some(Self::Utf8),
             "us-ascii" | "ascii" | "iso-ir-6" => Some(Self::Ascii),
             "iso-8859-1" | "latin1" | "latin-1" | "iso_8859-1" | "l1" => Some(Self::Latin1),
-            "windows-1252" | "cp1252" | "x-cp1252" => Some(Self::Windows1252),
-            _ => None,
+            _ => {
+                let enc_rs = encoding_rs::Encoding::for_label(lower.as_bytes())?;
+                Self::from_encoding_rs(enc_rs)
+            }
         }
     }
 
@@ -41,8 +94,99 @@ impl Encoding {
             Self::Utf8 => "utf-8",
             Self::Ascii => "us-ascii",
             Self::Latin1 => "iso-8859-1",
-            Self::Windows1252 => "windows-1252",
+            _ => self.to_encoding_rs().name(),
         }
+    }
+
+    /// Returns the `encoding_rs::Encoding` for variants that delegate to it.
+    fn to_encoding_rs(&self) -> &'static encoding_rs::Encoding {
+        match self {
+            Self::Utf8 => encoding_rs::UTF_8,
+            Self::Ascii | Self::Latin1 => encoding_rs::WINDOWS_1252,
+            Self::Windows1252 => encoding_rs::WINDOWS_1252,
+            Self::Iso8859_15 => encoding_rs::ISO_8859_15,
+            Self::Macintosh => encoding_rs::MACINTOSH,
+            Self::Iso8859_2 => encoding_rs::ISO_8859_2,
+            Self::Windows1250 => encoding_rs::WINDOWS_1250,
+            Self::Iso8859_3 => encoding_rs::ISO_8859_3,
+            Self::Iso8859_9 => encoding_rs::WINDOWS_1254,
+            Self::Windows1254 => encoding_rs::WINDOWS_1254,
+            Self::Iso8859_4 => encoding_rs::ISO_8859_4,
+            Self::Iso8859_10 => encoding_rs::ISO_8859_10,
+            Self::Iso8859_13 => encoding_rs::ISO_8859_13,
+            Self::Windows1257 => encoding_rs::WINDOWS_1257,
+            Self::Iso8859_14 => encoding_rs::ISO_8859_14,
+            Self::Iso8859_16 => encoding_rs::ISO_8859_16,
+            Self::Iso8859_5 => encoding_rs::ISO_8859_5,
+            Self::Windows1251 => encoding_rs::WINDOWS_1251,
+            Self::Koi8R => encoding_rs::KOI8_R,
+            Self::Koi8U => encoding_rs::KOI8_U,
+            Self::Ibm866 => encoding_rs::IBM866,
+            Self::XMacCyrillic => encoding_rs::X_MAC_CYRILLIC,
+            Self::Iso8859_7 => encoding_rs::ISO_8859_7,
+            Self::Windows1253 => encoding_rs::WINDOWS_1253,
+            Self::Iso8859_8 => encoding_rs::ISO_8859_8,
+            Self::Iso8859_8I => encoding_rs::ISO_8859_8_I,
+            Self::Windows1255 => encoding_rs::WINDOWS_1255,
+            Self::Iso8859_6 => encoding_rs::ISO_8859_6,
+            Self::Windows1256 => encoding_rs::WINDOWS_1256,
+            Self::Windows1258 => encoding_rs::WINDOWS_1258,
+            Self::Windows874 => encoding_rs::WINDOWS_874,
+            Self::ShiftJis => encoding_rs::SHIFT_JIS,
+            Self::EucJp => encoding_rs::EUC_JP,
+            Self::Iso2022Jp => encoding_rs::ISO_2022_JP,
+            Self::Gbk => encoding_rs::GBK,
+            Self::Gb18030 => encoding_rs::GB18030,
+            Self::Big5 => encoding_rs::BIG5,
+            Self::EucKr => encoding_rs::EUC_KR,
+            Self::Utf16Be => encoding_rs::UTF_16BE,
+            Self::Utf16Le => encoding_rs::UTF_16LE,
+        }
+    }
+
+    /// Maps an `encoding_rs::Encoding` to our enum.
+    fn from_encoding_rs(enc: &'static encoding_rs::Encoding) -> Option<Self> {
+        Some(match enc {
+            e if e == encoding_rs::UTF_8 => Self::Utf8,
+            e if e == encoding_rs::WINDOWS_1252 => Self::Windows1252,
+            e if e == encoding_rs::ISO_8859_15 => Self::Iso8859_15,
+            e if e == encoding_rs::MACINTOSH => Self::Macintosh,
+            e if e == encoding_rs::ISO_8859_2 => Self::Iso8859_2,
+            e if e == encoding_rs::WINDOWS_1250 => Self::Windows1250,
+            e if e == encoding_rs::ISO_8859_3 => Self::Iso8859_3,
+            e if e == encoding_rs::WINDOWS_1254 => Self::Windows1254,
+            e if e == encoding_rs::ISO_8859_4 => Self::Iso8859_4,
+            e if e == encoding_rs::ISO_8859_10 => Self::Iso8859_10,
+            e if e == encoding_rs::ISO_8859_13 => Self::Iso8859_13,
+            e if e == encoding_rs::WINDOWS_1257 => Self::Windows1257,
+            e if e == encoding_rs::ISO_8859_14 => Self::Iso8859_14,
+            e if e == encoding_rs::ISO_8859_16 => Self::Iso8859_16,
+            e if e == encoding_rs::ISO_8859_5 => Self::Iso8859_5,
+            e if e == encoding_rs::WINDOWS_1251 => Self::Windows1251,
+            e if e == encoding_rs::KOI8_R => Self::Koi8R,
+            e if e == encoding_rs::KOI8_U => Self::Koi8U,
+            e if e == encoding_rs::IBM866 => Self::Ibm866,
+            e if e == encoding_rs::X_MAC_CYRILLIC => Self::XMacCyrillic,
+            e if e == encoding_rs::ISO_8859_7 => Self::Iso8859_7,
+            e if e == encoding_rs::WINDOWS_1253 => Self::Windows1253,
+            e if e == encoding_rs::ISO_8859_8 => Self::Iso8859_8,
+            e if e == encoding_rs::ISO_8859_8_I => Self::Iso8859_8I,
+            e if e == encoding_rs::WINDOWS_1255 => Self::Windows1255,
+            e if e == encoding_rs::ISO_8859_6 => Self::Iso8859_6,
+            e if e == encoding_rs::WINDOWS_1256 => Self::Windows1256,
+            e if e == encoding_rs::WINDOWS_1258 => Self::Windows1258,
+            e if e == encoding_rs::WINDOWS_874 => Self::Windows874,
+            e if e == encoding_rs::SHIFT_JIS => Self::ShiftJis,
+            e if e == encoding_rs::EUC_JP => Self::EucJp,
+            e if e == encoding_rs::ISO_2022_JP => Self::Iso2022Jp,
+            e if e == encoding_rs::GBK => Self::Gbk,
+            e if e == encoding_rs::GB18030 => Self::Gb18030,
+            e if e == encoding_rs::BIG5 => Self::Big5,
+            e if e == encoding_rs::EUC_KR => Self::EucKr,
+            e if e == encoding_rs::UTF_16BE => Self::Utf16Be,
+            e if e == encoding_rs::UTF_16LE => Self::Utf16Le,
+            _ => return None,
+        })
     }
 
     /// Decodes a byte slice from this encoding into a UTF-8 string.
@@ -75,11 +219,11 @@ impl Encoding {
                 }
                 Ok(out)
             }
-            Self::Windows1252 => {
-                let (cow, _, had_errors) = encoding_rs::WINDOWS_1252.decode(bytes);
+            _ => {
+                let (cow, _, had_errors) = self.to_encoding_rs().decode(bytes);
                 if had_errors {
                     return Err(TermError::Encoding(
-                        "invalid windows-1252 sequence".into(),
+                        format!("invalid {} sequence", self.name()).into(),
                     ));
                 }
                 Ok(cow.into_owned())
@@ -113,7 +257,7 @@ impl Encoding {
                     if cp > 0xFF {
                         return Err(TermError::Encoding(
                             format!(
-                                "character '{}' (U+{:04X}) not representable in ISO-8859-1",
+                                "character '{}' (U+{:04X}) not representable in iso-8859-1",
                                 ch, cp
                             )
                             .into(),
@@ -123,14 +267,11 @@ impl Encoding {
                 }
                 Ok(out)
             }
-            Self::Windows1252 => {
-                let (cow, _, had_errors) = encoding_rs::WINDOWS_1252.encode(s);
+            _ => {
+                let (cow, _, had_errors) = self.to_encoding_rs().encode(s);
                 if had_errors {
                     return Err(TermError::Encoding(
-                        format!(
-                            "string contains characters not representable in windows-1252"
-                        )
-                        .into(),
+                        format!("string not representable in {}", self.name()).into(),
                     ));
                 }
                 Ok(cow.into_owned())
@@ -158,6 +299,19 @@ mod tests {
         assert_eq!(Encoding::from_name("Windows-1252"), Some(Encoding::Windows1252));
         assert_eq!(Encoding::from_name("us-ascii"), Some(Encoding::Ascii));
         assert_eq!(Encoding::from_name("unknown"), None);
+    }
+
+    #[test]
+    fn from_name_encoding_rs_labels() {
+        assert_eq!(Encoding::from_name("shift_jis"), Some(Encoding::ShiftJis));
+        assert_eq!(Encoding::from_name("euc-jp"), Some(Encoding::EucJp));
+        assert_eq!(Encoding::from_name("gbk"), Some(Encoding::Gbk));
+        assert_eq!(Encoding::from_name("big5"), Some(Encoding::Big5));
+        assert_eq!(Encoding::from_name("koi8-r"), Some(Encoding::Koi8R));
+        assert_eq!(Encoding::from_name("iso-8859-2"), Some(Encoding::Iso8859_2));
+        assert_eq!(Encoding::from_name("windows-1251"), Some(Encoding::Windows1251));
+        assert_eq!(Encoding::from_name("utf-16le"), Some(Encoding::Utf16Le));
+        assert_eq!(Encoding::from_name("utf-16be"), Some(Encoding::Utf16Be));
     }
 
     #[test]
@@ -198,8 +352,21 @@ mod tests {
 
     #[test]
     fn decode_windows1252() {
-        // 0x93 = left double quote in Windows-1252 (U+201C)
         assert_eq!(Encoding::Windows1252.decode(&[0x93]).unwrap(), "\u{201C}");
+    }
+
+    #[test]
+    fn decode_windows1251_cyrillic() {
+        // 0xCF 0xF0 0xE8 0xE2 0xE5 0xF2 = "Привет" in Windows-1251
+        let bytes = &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
+        assert_eq!(Encoding::Windows1251.decode(bytes).unwrap(), "Привет");
+    }
+
+    #[test]
+    fn decode_shift_jis() {
+        // 0x82 0xB1 0x82 0xF1 = "こん" in Shift_JIS
+        let bytes = &[0x82, 0xB1, 0x82, 0xF1];
+        assert_eq!(Encoding::ShiftJis.decode(bytes).unwrap(), "こん");
     }
 
     #[test]
@@ -227,7 +394,6 @@ mod tests {
 
     #[test]
     fn encode_latin1_out_of_range() {
-        // U+0100 (Ā) is not in Latin1
         assert!(Encoding::Latin1.encode("Ā").is_err());
     }
 
@@ -236,6 +402,14 @@ mod tests {
         assert_eq!(
             Encoding::Windows1252.encode("\u{201C}").unwrap(),
             vec![0x93]
+        );
+    }
+
+    #[test]
+    fn encode_windows1251_cyrillic() {
+        assert_eq!(
+            Encoding::Windows1251.encode("Привет").unwrap(),
+            vec![0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2]
         );
     }
 
@@ -258,9 +432,27 @@ mod tests {
     }
 
     #[test]
+    fn encode_decode_roundtrip_windows1251() {
+        let original = "Привет";
+        let bytes = Encoding::Windows1251.encode(original).unwrap();
+        let s = Encoding::Windows1251.decode(&bytes).unwrap();
+        assert_eq!(s, original);
+    }
+
+    #[test]
     fn name_roundtrip() {
-        for enc in [Encoding::Utf8, Encoding::Ascii, Encoding::Latin1, Encoding::Windows1252] {
-            assert_eq!(Encoding::from_name(enc.name()), Some(enc));
+        for enc in [
+            Encoding::Utf8, Encoding::Ascii, Encoding::Latin1, Encoding::Windows1252,
+            Encoding::Windows1251, Encoding::Koi8R, Encoding::ShiftJis, Encoding::EucJp,
+            Encoding::Gbk, Encoding::Big5, Encoding::EucKr, Encoding::Utf16Be,
+        ] {
+            assert_eq!(
+                Encoding::from_name(enc.name()),
+                Some(enc),
+                "name roundtrip failed for {:?} (name={})",
+                enc,
+                enc.name()
+            );
         }
     }
 }
