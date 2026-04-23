@@ -54,6 +54,9 @@ pub enum TermError {
     // An   OperDef error
     #[error("operdef error: {0}")]
     OperDef(String),
+
+    #[error("encoding error: {0}")]
+    Encoding(String),
 }
 
 /// Internal errors that may occur when constructing terms or

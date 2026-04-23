@@ -19,6 +19,7 @@
 //! [`arena_terms`]: https://crates.io/crates/arena-terms
 //! [`aslr`]: https://crates.io/crates/parlex-gen
 
+use crate::encoding::Encoding;
 use crate::{TermLexer, TermToken, TokenID, Value};
 use arena_terms::{Arena, Assoc, Fixity, MAX_OPER_PREC, MIN_OPER_PREC, Term, View};
 use parlex::{
@@ -747,12 +748,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermTokenParser, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermTokenParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
-/// let mut parser = TermTokenParser::try_new(input).unwrap();
+/// let mut parser = TermTokenParser::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 4);
 /// ```
@@ -785,8 +786,8 @@ where
     /// # Errors
     /// Returns an error if the lexer context cannot be initialized
     /// or if the generated parser tables fail to load.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
-        let lexer = TermLexer::try_new(input)?;
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
+        let lexer = TermLexer::try_new(input, encoding)?;
         let driver = TermParserDriver {
             _marker: PhantomData,
             terms: Vec::new(),
@@ -805,15 +806,16 @@ where
 /// # Parameters
 /// - `arena`: Arena allocator used for constructing term structures.
 /// - `defs_input`: Input byte iterator yielding the operator definition terms.
+/// - `encoding`: Input encoding of the definitions stream.
 ///
 /// # Errors
 /// Returns an error if parsing the operator term list fails or produces
 /// an invalid operator specification.
-pub fn define_opers<I>(arena: &mut Arena, defs_input: I) -> Result<(), ParlexError>
+pub fn define_opers<I>(arena: &mut Arena, defs_input: I, encoding: Encoding) -> Result<(), ParlexError>
 where
     I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
 {
-    let mut defs_parser = TermParser::try_new(defs_input)?;
+    let mut defs_parser = TermParser::try_new(defs_input, encoding)?;
     while let Some(term) = defs_parser.try_next_with_context(arena)? {
         arena
             .define_opers(term)
@@ -916,12 +918,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermParser, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermParser, TokenID, Value};
 /// # use arena_terms::Arena;
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::try_with_default_opers().unwrap();
 /// let input = IterInput::from("hello = 1 .\n foo =\n [5, 3, 2].\n (world, hello, 10).\n\n1000".bytes());
-/// let mut parser = TermParser::try_new(input).unwrap();
+/// let mut parser = TermParser::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = parser.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 4);
 /// ```
@@ -954,8 +956,8 @@ where
     /// # Errors
     /// Returns an error if the lexer context cannot be initialized
     /// or if the generated parser tables fail to load.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
-        let parser: TermTokenParser<I> = TermTokenParser::try_new(input)?;
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
+        let parser: TermTokenParser<I> = TermTokenParser::try_new(input, encoding)?;
         Ok(Self { parser })
     }
 }
@@ -1039,10 +1041,10 @@ op(not(x),prefix,800,right),
 
     fn parse(arena: &mut Arena, defs: Option<&str>, s: &str) -> Vec<Term> {
         let input = IterInput::from(s.bytes());
-        let mut parser = TermParser::try_new(input).expect("cannot create parser");
+        let mut parser = TermParser::try_new(input, Encoding::Utf8).expect("cannot create parser");
         if let Some(defs) = defs {
             let defs_input = IterInput::from(defs.bytes());
-            define_opers(arena, defs_input).expect("cannot define ops");
+            define_opers(arena, defs_input, Encoding::Utf8).expect("cannot define ops");
         }
         let ts = parser
             .try_collect_with_context(arena)
@@ -1061,6 +1063,83 @@ op(not(x),prefix,800,right),
         dbg!(&s);
         assert_eq!(ts.len(), 1);
         assert_eq!(s, "'<='('*'(2, 2), 5)");
+    }
+
+    /// String interpolation with a surrounding tighter operator.
+    ///
+    /// `+` at precedence 380 binds tighter than `++` at 500 (default).
+    /// Both legacy and arena-terms emit outer parens around the interpolated string:
+    ///   "a{x}b" + 1  →  ("a" ++ (x) ++ "b") + 1
+    ///
+    /// Without outer parens, precedence resolution would still produce the same
+    /// parse tree here (because `+` binds tighter, it gets reduced first inside
+    /// the `++` chain), but the outer parens ensure correctness in edge cases
+    /// with mixed-associativity same-precedence operators.
+    #[test]
+    fn string_interpolation_outer_paren_isolation() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, Some(SAMPLE_DEFS), r#""a{xx}b" + 1 ."#);
+        assert_eq!(ts.len(), 1);
+        let s = format!("{}", ts[0].display(arena));
+        //   '+'('++'('++'("a", xx), "b"), 1)
+        assert_eq!(s, r#"'+'('++'('++'("a", xx), "b"), 1)"#);
+    }
+
+    /// A bare non-interpolated string `"hello"` is wrapped as `( "hello" )` by
+    /// the lexer, but the parser unwraps unary tuples so the resulting term is
+    /// just `"hello"` (no surrounding structure).
+    #[test]
+    fn bare_string_unwraps_to_plain_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#""hello" ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(format!("{}", ts[0].display(arena)), r#""hello""#);
+    }
+
+    /// Bare strings used as function arguments: `foo("hello", "world")`.
+    /// Despite the lexer emitting outer parens around each string, they unwrap
+    /// correctly as distinct arguments.
+    #[test]
+    fn bare_strings_as_func_args() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#"foo("hello", "world") ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(
+            format!("{}", ts[0].display(arena)),
+            r#"foo("hello", "world")"#
+        );
+    }
+
+    /// Prefix operator applied to an interpolated string.
+    ///
+    /// `-` at prec 800 (prefix, right-assoc) binds tighter than `++` at 500.
+    /// Without outer parens, `- "a{xx}b"` would parse as `(-"a") ++ xx ++ "b"`,
+    /// applying the minus only to the first string piece. The outer parens
+    /// ensure the minus applies to the entire interpolated string:
+    ///   - ("a" ++ xx ++ "b")
+    #[test]
+    fn prefix_op_on_interpolated_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, Some(SAMPLE_DEFS), r#"- "a{xx}b" ."#);
+        assert_eq!(ts.len(), 1);
+        let s = format!("{}", ts[0].display(arena));
+        // Minus applies to the whole interpolated string, not just "a"
+        assert_eq!(s, r#"'-'('++'('++'("a", xx), "b"))"#);
+    }
+
+    /// Prefix operator on a bare (non-interpolated) string also works —
+    /// the outer `( STR )` unwraps so the prefix applies directly.
+    #[test]
+    fn prefix_op_on_bare_string() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let arena = &mut Arena::try_with_default_opers().unwrap();
+        let ts = parse(arena, None, r#"- "hello" ."#);
+        assert_eq!(ts.len(), 1);
+        assert_eq!(format!("{}", ts[0].display(arena)), r#"'-'("hello")"#);
     }
 
     #[test]

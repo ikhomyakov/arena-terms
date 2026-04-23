@@ -1,5 +1,24 @@
 # Release Notes
 
+## [0.6.0] — 2026-04-22
+
+### Added
+
+* **`Encoding` enum with `decode()` / `encode()` methods.** Supports all WHATWG encodings via
+  `encoding_rs`: UTF-8, ASCII, ISO-8859-1 through 16, Windows-1250 through 1258, KOI8-R/U,
+  IBM866, Shift_JIS, EUC-JP, ISO-2022-JP, GBK, GB18030, Big5, EUC-KR, UTF-16BE/LE, and more.
+  `Encoding::from_name()` accepts all WHATWG/IANA charset labels (case-insensitive).
+
+* **`TermError::Encoding` variant** for encoding/decoding errors.
+
+### Changed
+
+* **License changed from LGPL-3.0-or-later to MIT.**
+
+### Dependencies
+
+* New dependency: `encoding_rs` 0.8.
+
 ## [0.5.0] — 2026-03-20
 
 ### Breaking Changes

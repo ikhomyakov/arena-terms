@@ -55,13 +55,13 @@
 //!
 //! ## License
 //!
-//! Copyright (c) 2005–2025 IKH Software, Inc.
+//! Copyright (c) 2005–2026 IKH Software, Inc.
 //!
-//! Released under the terms of the GNU Lesser General Public License, version 3.0 or
-//! (at your option) any later version (LGPL-3.0-or-later).
+//! Released under the [MIT License](https://opensource.org/licenses/MIT).
 
 mod arena;
 mod display;
+mod encoding;
 mod error;
 mod oper;
 mod term;
@@ -69,6 +69,7 @@ mod view;
 
 pub use arena::{Arena, ArenaID, ArenaStats, EpochID, MAX_LIVE_EPOCHS};
 pub use display::TermDisplay;
+pub use encoding::Encoding;
 pub(crate) use error::InternalTermError;
 pub use error::TermError;
 pub use oper::{

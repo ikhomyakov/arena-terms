@@ -27,10 +27,9 @@
 //!
 //! ## License
 //!
-//! Copyright (c) 2005–2025 IKH Software, Inc.
+//! Copyright (c) 2005–2026 IKH Software, Inc.
 //!
-//! Released under the terms of the GNU Lesser General Public License, version 3.0 or
-//! (at your option) any later version (LGPL-3.0-or-later).
+//! Released under the [MIT License](https://opensource.org/licenses/MIT).
 //!
 //! ## See Also
 //!
@@ -38,10 +37,12 @@
 //! - [parlex](https://crates.io/crates/parlex) — lexer and parser generators core support library
 //! - [parlex-gen](https://crates.io/crates/parlex-gen) — lexer and parser generators ALEX and ASLR
 
+mod encoding;
 mod lexer;
 mod parser;
 mod token;
 
+pub use encoding::Encoding;
 pub use lexer::{TermLexer, TermLexerDriver};
 pub use parser::parser_data::TokenID;
 pub use parser::{TermParser, TermParserDriver, TermTokenParser, define_opers};

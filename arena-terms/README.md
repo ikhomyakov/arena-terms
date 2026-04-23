@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/arena-terms.svg)](https://crates.io/crates/arena-terms)
 [![Documentation](https://docs.rs/arena-terms/badge.svg)](https://docs.rs/arena-terms)
-[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 
@@ -496,12 +496,40 @@ This project is still evolving. The following limitations are known and may affe
   * **Recommendation:** Avoid using arbitrary variable names — this will be **prohibited in future releases**. Always use names that follow the convention: `[A-Z_][A-Za-z0-9_]*`.
 
 
+## Encoding Support
+
+The `Encoding` enum provides `decode()` and `encode()` methods for transcoding between
+any supported encoding and UTF-8. All WHATWG Encoding Standard encodings are supported
+via `encoding_rs`:
+
+| Category | Encodings |
+|----------|-----------|
+| Unicode | UTF-8, UTF-16BE, UTF-16LE |
+| Western | US-ASCII, ISO-8859-1, ISO-8859-15, Windows-1252, Macintosh |
+| Central European | ISO-8859-2, Windows-1250 |
+| South European | ISO-8859-3, ISO-8859-9, Windows-1254 |
+| North European / Baltic | ISO-8859-4, ISO-8859-10, ISO-8859-13, Windows-1257 |
+| Celtic | ISO-8859-14 |
+| Romanian | ISO-8859-16 |
+| Cyrillic | ISO-8859-5, Windows-1251, KOI8-R, KOI8-U, IBM866, x-mac-cyrillic |
+| Greek | ISO-8859-7, Windows-1253 |
+| Hebrew | ISO-8859-8, ISO-8859-8-I, Windows-1255 |
+| Arabic | ISO-8859-6, Windows-1256 |
+| Vietnamese | Windows-1258 |
+| Thai | Windows-874 |
+| Japanese | Shift_JIS, EUC-JP, ISO-2022-JP |
+| Chinese | GBK, GB18030, Big5 |
+| Korean | EUC-KR |
+
+`Encoding::from_name()` accepts all WHATWG/IANA charset labels (case-insensitive),
+including common aliases like `"latin1"`, `"sjis"`, `"cp1251"`, `"chinese"`, etc.
+
+
 ## License
 
 Copyright (c) 2005–2026 IKH Software, Inc.
 
-Released under the terms of the GNU Lesser General Public License, version 3.0
-or (at your option) any later version (LGPL-3.0-or-later).
+Released under the [MIT License](https://opensource.org/licenses/MIT).
 
 See [LICENSE.md](./LICENSE.md) for details.
 

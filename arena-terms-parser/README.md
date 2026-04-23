@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/arena-terms-parser.svg)](https://crates.io/crates/arena-terms-parser)
 [![Documentation](https://docs.rs/arena-terms-parser/badge.svg)](https://docs.rs/arena-terms-parser)
-[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 Parser for **arena-backed, Prolog-like terms**.
@@ -25,6 +25,12 @@ crate to store terms efficiently in an arena and is built on top of the
 - **Operators**
   Dynamically handles operator fixity, associativity, and precedence rules.
 
+- **Multi-encoding**
+  Supports all WHATWG encodings via `encoding_rs`: UTF-8, ASCII, ISO-8859-1 through 16,
+  Windows-1250 through 1258, KOI8-R/U, Shift_JIS, EUC-JP, GBK, GB18030, Big5, EUC-KR,
+  UTF-16, and more. All internal term representation is UTF-8; input bytes are transcoded
+  automatically. Binary content (`bin{...}`) always collects raw source bytes.
+
 - **Arena-backed**
   Terms are stored compactly in arenas for efficient allocation and traversal.
 
@@ -35,7 +41,7 @@ Parsing a string into arena terms:
 
 ```rust
 use arena_terms::Arena;
-use arena_terms_parser::{TermParser, define_opers};
+use arena_terms_parser::{Encoding, TermParser, define_opers};
 use try_next::{IterInput, TryNextWithContext};
 
 const DEFS: &str = "[
@@ -50,8 +56,8 @@ const TERMS: &str = "
 
 fn main() {
     let mut arena = Arena::try_with_default_opers().unwrap();
-    define_opers(&mut arena, IterInput::from(DEFS.bytes())).unwrap();
-    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes())).unwrap();
+    define_opers(&mut arena, IterInput::from(DEFS.bytes()), Encoding::Utf8).unwrap();
+    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes()), Encoding::Utf8).unwrap();
 
     while let Some(term) = parser.try_next_with_context(&mut arena).unwrap() {
         println!("{}", term.display(&arena));
@@ -71,8 +77,36 @@ cargo build --release --bin arena-terms-parser
 Then run:
 
 ```bash
-./target/release/parser --terms input.ax
+# Parse terms
+./target/release/arena-terms-parser parse --terms input.ax
+./target/release/arena-terms-parser parse --encoding iso-8859-1 --terms input.ax
+./target/release/arena-terms-parser parse --defs ops.ax --terms input.ax
+
+# Decode: bytes in source encoding → UTF-8
+./target/release/arena-terms-parser decode --from windows-1251 --input file.bin
+echo -n $'\xCF\xF0\xE8\xE2\xE5\xF2' | ./target/release/arena-terms-parser decode --from windows-1251
+
+# Encode: UTF-8 → bytes in target encoding
+echo -n 'café' | ./target/release/arena-terms-parser encode --to iso-8859-1
+./target/release/arena-terms-parser encode --to shift_jis --input japanese.txt
 ```
+
+All encoding names accept any WHATWG/IANA charset label (case-insensitive), including
+common aliases like `latin1`, `sjis`, `cp1251`, `chinese`, etc. Default: `utf-8`.
+
+**Note:** In `bin{N:...}` and `text{N:...}`, *N* is the number of **raw bytes**, not characters.
+For example, with UTF-8 input, `text{10:Игорь}` is correct (5 Cyrillic characters = 10 UTF-8 bytes),
+while `text{5:Игорь}` will fail to parse.
+
+
+## Known Divergences from Legacy Parser
+
+* **`123e5` is accepted as a float literal.** The legacy parser requires a decimal point
+  (e.g., `1.23e5`), treating `123e5` as integer `123` followed by atom `e5`. Arena-terms
+  accepts the `DEC+EXP` form as valid, following C/Python/JSON/Rust conventions.
+
+* **Date representation.** Legacy uses Excel serial dates (double); arena-terms uses Unix
+  epoch milliseconds (i64) with extended ISO-8601 format support.
 
 
 ## Documentation
@@ -84,7 +118,7 @@ For detailed API documentation, visit [docs.rs/arena-terms-parser](https://docs.
 
 Copyright (c) 2005–2026 IKH Software, Inc.
 
-Released under the terms of the GNU Lesser General Public License, version 3.0 or (at your option) any later version (LGPL-3.0-or-later).
+Released under the [MIT License](https://opensource.org/licenses/MIT).
 
 ## See Also
 

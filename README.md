@@ -13,7 +13,7 @@ Together, they enable compact representation, fast allocation, and convenient ma
 
 [![Crates.io](https://img.shields.io/crates/v/arena-terms.svg)](https://crates.io/crates/arena-terms)
 [![Documentation](https://docs.rs/arena-terms/badge.svg)](https://docs.rs/arena-terms)
-[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 A **Prolog-like term library** that stores immutable terms in an arena for compact, copy-by-value semantics.
@@ -24,6 +24,7 @@ This crate provides:
 * `Arena` — an allocator that interns terms
 * `View<'a>` — a borrowed representation for inspecting terms without allocation
 * `IntoTerm` — a trait and a suite of macros (`func!`, `list!`, `tuple!`, `atom!`, `var!`, etc.) for ergonomic term construction
+* `Encoding` — decode/encode support for all WHATWG encodings (UTF-8, ISO-8859-*, Windows-125*, KOI8, Shift_JIS, GBK, Big5, EUC-KR, etc.)
 
 **Example:**
 
@@ -50,7 +51,7 @@ if let Ok(View::Func(ar, functor, args)) = term.view(&arena) {
 
 [![Crates.io](https://img.shields.io/crates/v/arena-terms-parser.svg)](https://crates.io/crates/arena-terms-parser)
 [![Documentation](https://docs.rs/arena-terms-parser/badge.svg)](https://docs.rs/arena-terms-parser)
-[![License: LGPL-3.0-or-later](https://img.shields.io/badge/License-LGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
 
 A **parser** for arena-backed Prolog-like terms, built using the [`parlex`](https://crates.io/crates/parlex) and [`parlex-gen`](https://crates.io/crates/parlex-gen)
@@ -59,7 +60,7 @@ A **parser** for arena-backed Prolog-like terms, built using the [`parlex`](http
 
 ```rust
 use arena_terms::Arena;
-use arena_terms_parser::{TermParser, define_opers};
+use arena_terms_parser::{Encoding, TermParser, define_opers};
 use try_next::{IterInput, TryNextWithContext};
 
 const DEFS: &str = "[
@@ -74,8 +75,8 @@ const TERMS: &str = "
 
 fn main() {
     let mut arena = Arena::try_with_default_opers().unwrap();
-    define_opers(&mut arena, IterInput::from(DEFS.bytes())).unwrap();
-    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes())).unwrap();
+    define_opers(&mut arena, IterInput::from(DEFS.bytes()), Encoding::Utf8).unwrap();
+    let mut parser = TermParser::try_new(IterInput::from(TERMS.bytes()), Encoding::Utf8).unwrap();
 
     while let Some(term) = parser.try_next_with_context(&mut arena).unwrap() {
         println!("{}", term.display(&arena));
@@ -98,7 +99,7 @@ cargo test
 
 Copyright (c) 2005–2026 IKH Software, Inc.
 
-Released under the terms of the GNU Lesser General Public License, version 3.0 or (at your option) any later version (LGPL-3.0-or-later).
+Released under the [MIT License](https://opensource.org/licenses/MIT).
 
 ## Contributing
 

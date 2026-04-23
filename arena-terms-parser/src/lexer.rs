@@ -27,6 +27,7 @@
 //! [`OperDefs`]: crate::oper::OperDefs
 //! [`alex`]: https://crates.io/crates/parlex-gen
 
+use crate::encoding::Encoding;
 use crate::{TermToken, TokenID, Value};
 use lexer_data::{LexData, Mode, Rule};
 use parlex::{Lexer, LexerData, LexerDriver, LexerStats, ParlexError, Span};
@@ -134,6 +135,9 @@ pub struct TermLexerDriver<I> {
     /// Marker to bind the driver to the input type `I` without storing it.
     _marker: PhantomData<I>,
 
+    /// Input encoding for transcoding buffer bytes to UTF-8 strings.
+    encoding: Encoding,
+
     /// Secondary buffer.
     pub buffer2: Vec<u8>,
 
@@ -212,28 +216,27 @@ fn yield_optab<I>(
     });
 }
 
-#[inline]
-fn take_bytes<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>) -> Vec<u8>
-where
-    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
-{
-    lexer.accum_flag = false;
-    ::core::mem::take(&mut lexer.buffer)
-}
-
-#[inline]
-fn take_str<I>(lexer: &mut Lexer<I, TermLexerDriver<I>, Arena>) -> Result<String, ParlexError>
-where
-    I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
-{
-    lexer.accum_flag = false;
-    let bytes = take_bytes(lexer);
-    let s = ::std::string::String::from_utf8(bytes)
-        .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
-    Ok(String::from(s))
-}
-
 impl<I> TermLexerDriver<I> {
+    #[inline]
+    fn take_bytes(&mut self, lexer: &mut Lexer<I, Self, Arena>) -> Vec<u8>
+    where
+        I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+    {
+        lexer.accum_flag = false;
+        std::mem::take(&mut lexer.buffer)
+    }
+
+    #[inline]
+    fn take_str(&mut self, lexer: &mut Lexer<I, Self, Arena>) -> Result<String, ParlexError>
+    where
+        I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
+    {
+        let bytes = self.take_bytes(lexer);
+        let s = self.encoding.decode(&bytes)
+            .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
+        Ok(String::from(s))
+    }
+
     #[inline]
     fn take_bytes2(&mut self, lexer: &mut Lexer<I, Self, Arena>) -> Vec<u8>
     where
@@ -248,9 +251,8 @@ impl<I> TermLexerDriver<I> {
     where
         I: TryNextWithContext<Arena, Item = u8, Error: std::fmt::Display + 'static>,
     {
-        lexer.accum_flag = false;
-        let bytes = std::mem::take(&mut self.buffer2);
-        let s = std::string::String::from_utf8(bytes)
+        let bytes = self.take_bytes2(lexer);
+        let s = self.encoding.decode(&bytes)
             .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
         Ok(String::from(s))
     }
@@ -297,9 +299,9 @@ where
             "ACTION begin: mode {:?}, rule {:?}, buf {:?}, buf2 {:?}, label {:?}, accum {}",
             lexer.mode(),
             rule,
-            str::from_utf8(&lexer.buffer),
-            str::from_utf8(&self.buffer2),
-            str::from_utf8(&self.bin_label),
+            std::string::String::from_utf8_lossy(&lexer.buffer),
+            std::string::String::from_utf8_lossy(&self.buffer2),
+            std::string::String::from_utf8_lossy(&self.bin_label),
             lexer.accum_flag,
         );
         match rule {
@@ -371,7 +373,7 @@ where
             Rule::Func => {
                 self.nest_count += 1;
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let atom = arena.atom(&s);
                 let op_tab_idx = arena.lookup_oper(&s);
                 let op_tab = arena.get_oper(op_tab_idx);
@@ -409,7 +411,7 @@ where
                 }
             }
             Rule::Var => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 yield_term(lexer, TokenID::Var, arena.var(s), lexer.span());
             }
             Rule::Atom => {
@@ -417,7 +419,7 @@ where
                     yield_id(lexer, TokenID::Dot);
                     yield_id(lexer, TokenID::End);
                 } else {
-                    let s = take_str(lexer)?;
+                    let s = self.take_str(lexer)?;
                     let atom = arena.atom(&s);
                     let op_tab_idx = arena.lookup_oper(&s);
                     let op_tab = arena.get_oper(op_tab_idx);
@@ -430,7 +432,7 @@ where
             }
 
             Rule::DateEpoch => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.pop();
                 s.drain(0..5);
                 let s = s.trim();
@@ -632,10 +634,19 @@ where
                 }
             }
             r @ (Rule::BinCountNLChar | Rule::TextCountNewLine) => {
-                // New line
+                // New line.
+                // - bin{N:...}: preserve raw bytes verbatim (including \r\n).
+                // - text{N:...}: normalize \r\n → \n to match legacy behavior
+                //   (legacy's `{NL}` rule appends a single "\n" regardless).
+                // Accumulation is on in these modes, so the matched newline is
+                // at the tail of `lexer.buffer`. Check the last two bytes.
                 self.span2.merge(lexer.span_ref());
-                if lexer.buffer[0] == b'\r' {
-                    lexer.buffer.remove(0);
+                if r == Rule::TextCountNewLine {
+                    let len = lexer.buffer.len();
+                    if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                        lexer.buffer.truncate(len - 2);
+                        lexer.buffer.push(b'\n');
+                    }
                 }
                 self.bin_count -= 1;
                 if self.bin_count == 0 {
@@ -740,24 +751,30 @@ where
                     self.script_curly_nest_count -= 1;
                 } else {
                     lexer.buffer.pop();
-                    let s = take_str(lexer)?;
+                    let s = self.take_str(lexer)?;
                     yield_term(lexer, TokenID::Str, arena.str(s), self.span2);
                     lexer.begin(Mode::Expr);
                 }
             }
             Rule::ScriptNewLine => {
-                // New line
+                // Normalize \r\n → \n inside script blocks `{...}` (match legacy).
+                // Accumulation is on, so the matched newline is at the tail of the buffer.
                 self.span2.merge(lexer.span_ref());
+                let len = lexer.buffer.len();
+                if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                    lexer.buffer.truncate(len - 2);
+                    lexer.buffer.push(b'\n');
+                }
             }
             Rule::HexConst => {
                 lexer.buffer.drain(0..2);
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let val = parse_i64(s.as_str(), 16)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::BaseConst => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let (base_str, digits) = s.split_once('\'').ok_or(ParlexError {
                     message: format!("missing `'` separator"),
                     span: Some(lexer.span()),
@@ -770,14 +787,14 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharHex => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.drain(0..4);
                 let val = parse_i64(s.as_str(), 16)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharOct => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.drain(0..3);
                 let val = parse_i64(s.as_str(), 8)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
@@ -788,7 +805,7 @@ where
                 yield_term(lexer, TokenID::Int, arena.int('\n' as i64), lexer.span());
             }
             Rule::CharNotBackslash => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.drain(0..2);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -797,7 +814,7 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::CharCtrl => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.drain(0..4);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -854,7 +871,7 @@ where
                 );
             }
             Rule::CharAny => {
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.drain(0..3);
                 let val = s.chars().next().ok_or(ParlexError {
                     message: format!("invalid char"),
@@ -863,25 +880,31 @@ where
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::OctConst => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let val = parse_i64(s.as_str(), 8)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::DecConst => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let val = parse_i64(s.as_str(), 10)
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Int, arena.int(val), lexer.span());
             }
             Rule::FPConst => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 let val: f64 = s
                     .parse()
                     .map_err(|e| ParlexError::from_err(e, Some(lexer.span())))?;
                 yield_term(lexer, TokenID::Real, arena.real(val), lexer.span());
             }
             Rule::DoubleQuote => {
+                // Wrap the whole string in `( ... )` to match legacy emission.
+                // This isolates interpolated strings from surrounding operators
+                // at the same precedence as `++` but with different associativity.
+                // For bare strings, the unary tuple is unwrapped by the parser.
+                self.nest_count += 1;
+                yield_id(lexer, TokenID::LeftParen);
                 lexer.begin(Mode::Str);
                 lexer.clear();
                 lexer.accum();
@@ -990,19 +1013,22 @@ where
             Rule::StrDoubleQuote => {
                 lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 yield_term(lexer, TokenID::Str, arena.str(s), lexer.span());
+                // Close the outer wrap opened by `DoubleQuote`.
+                self.nest_count -= 1;
+                yield_id(lexer, TokenID::RightParen);
             }
             Rule::AtomSingleQuote => {
                 lexer.begin(Mode::Expr);
                 lexer.buffer.pop();
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 yield_term(lexer, TokenID::Atom, arena.atom(s), lexer.span());
             }
             Rule::AtomLeftParen => {
                 lexer.begin(Mode::Expr);
                 self.nest_count += 1;
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.truncate(s.len() - 2);
                 yield_term(lexer, TokenID::Func, arena.atom(s), lexer.span());
             }
@@ -1011,7 +1037,7 @@ where
                 lexer.begin(Mode::Expr);
                 self.nest_count += 1;
                 self.curly_nest_count += 1;
-                let mut s = take_str(lexer)?;
+                let mut s = self.take_str(lexer)?;
                 s.pop();
                 yield_term(lexer, TokenID::Str, arena.str(s), lexer.span());
                 let op_tab_idx = arena.lookup_oper("++");
@@ -1025,10 +1051,17 @@ where
                 yield_id(lexer, TokenID::LeftParen);
             }
             Rule::StrAtomNewLine => {
-                // New line
+                // Normalize \r\n → \n inside quoted strings/atoms (matches legacy behavior).
+                // The DFA pattern `\r?\n` pushed either 1 or 2 bytes to the buffer.
+                // If the last two bytes are `\r\n`, replace with a single `\n`.
+                let len = lexer.buffer.len();
+                if len >= 2 && lexer.buffer[len - 2] == b'\r' {
+                    lexer.buffer.truncate(len - 2);
+                    lexer.buffer.push(b'\n');
+                }
             }
             Rule::Error => {
-                let s = take_str(lexer)?;
+                let s = self.take_str(lexer)?;
                 return Err(ParlexError {
                     message: format!("error on lexeme {:?}", s),
                     span: Some(lexer.span()),
@@ -1050,9 +1083,9 @@ where
             "ACTION end:   mode {:?}, rule {:?}, buf {:?}, buf2 {:?}, label {:?}, accum {}",
             lexer.mode(),
             rule,
-            str::from_utf8(&lexer.buffer),
-            str::from_utf8(&self.buffer2),
-            str::from_utf8(&self.bin_label),
+            std::string::String::from_utf8_lossy(&lexer.buffer),
+            std::string::String::from_utf8_lossy(&self.buffer2),
+            std::string::String::from_utf8_lossy(&self.bin_label),
             lexer.accum_flag,
         );
 
@@ -1096,12 +1129,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// # use arena_terms_parser::{TermToken, TermLexer, TokenID, Value};
+/// # use arena_terms_parser::{Encoding, TermToken, TermLexer, TokenID, Value};
 /// # use arena_terms::{Arena};
 /// # use try_next::{IterInput, TryNextWithContext};
 /// let mut arena = Arena::new();
 /// let input = IterInput::from("hello\n +\n world\n\n123".bytes());
-/// let mut lexer = TermLexer::try_new(input).unwrap();
+/// let mut lexer = TermLexer::try_new(input, Encoding::Utf8).unwrap();
 /// let vs = lexer.try_collect_with_context(&mut arena).unwrap();
 /// assert_eq!(vs.len(), 5);
 /// ```
@@ -1155,9 +1188,10 @@ where
     /// # Errors
     /// Returns a [`LexerError`] if the lexer cannot be constructed from the
     /// given input and operatir table.
-    pub fn try_new(input: I) -> Result<Self, ParlexError> {
+    pub fn try_new(input: I, encoding: Encoding) -> Result<Self, ParlexError> {
         let driver = TermLexerDriver {
             _marker: PhantomData,
+            encoding,
             nest_count: 0,
             comment_nest_count: 0,
             curly_nest_count: 0,
@@ -1228,7 +1262,7 @@ mod tests {
 
     fn lex(arena: &mut Arena, s: &str) -> Vec<TermToken> {
         let input = IterInput::from(s.bytes());
-        let mut lexer = TermLexer::try_new(input).expect("cannot create lexer");
+        let mut lexer = TermLexer::try_new(input, Encoding::Utf8).expect("cannot create lexer");
         lexer.try_collect_with_context(arena).expect("lexer error")
     }
 
@@ -1398,15 +1432,18 @@ mod tests {
             "/* single [ ( { /* line */ comment */\n\"hello\" {hello} text{5:hello} text{e:hello:e} text{e:h:e e:e:e 2:ll e:o:e} text{\ne\nhello\ne}",
         );
         dbg!(&ts);
-        assert!(ts.len() == 7);
-        assert!(matches!(
-            Term::try_from(ts[0].value.clone())
-                .unwrap()
-                .view(&arena)
-                .unwrap(),
-            View::Str(_)
-        ));
-        assert!(ts.iter().take(ts.len() - 1).all(|t| {
+        // "hello" emits ( STR ), so we get 6 string-bearing tokens + paren pair + End.
+        // Token sequence: ( STR(hello) ) STR(hello) STR(hello) STR(hello) STR(hello) STR(hello) End
+        assert!(ts.len() == 9);
+        // Filter to just tokens that carry a Str term.
+        let strs: Vec<&TermToken> = ts
+            .iter()
+            .filter(|t| {
+                matches!(t.token_id, TokenID::Str)
+            })
+            .collect();
+        assert_eq!(strs.len(), 6);
+        assert!(strs.iter().all(|t| {
             match Term::try_from(t.value.clone())
                 .unwrap()
                 .view(&arena)
@@ -1431,12 +1468,176 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
         let arena = &mut Arena::new();
         let ts = lex(arena, "\"aaa{1 + 2}bbb{3 * 4}ccc\"");
-        assert_eq!(ts.len(), 18);
-        let t0: Term = ts[0].value.clone().try_into().unwrap();
-        let t1: Term = ts[8].value.clone().try_into().unwrap();
-        let t2: Term = ts[16].value.clone().try_into().unwrap();
+        // 20 tokens: ( STR(aaa) ++ ( 1 + 2 ) ++ STR(bbb) ++ ( 3 * 4 ) ++ STR(ccc) ) End
+        assert_eq!(ts.len(), 20);
+        assert_eq!(ts[0].token_id, TokenID::LeftParen);
+        assert_eq!(ts[18].token_id, TokenID::RightParen);
+        let t0: Term = ts[1].value.clone().try_into().unwrap();
+        let t1: Term = ts[9].value.clone().try_into().unwrap();
+        let t2: Term = ts[17].value.clone().try_into().unwrap();
         assert_eq!(t0.unpack_str(arena).unwrap(), "aaa");
         assert_eq!(t1.unpack_str(arena).unwrap(), "bbb");
         assert_eq!(t2.unpack_str(arena).unwrap(), "ccc");
+    }
+
+    /// String literals preserve bare LF — matches legacy behavior.
+    #[test]
+    fn string_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\nworld\"");
+        // 4 tokens: ( STR ) End
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
+    }
+
+    /// String literals normalize CRLF to LF — matches legacy behavior.
+    #[test]
+    fn string_normalizes_crlf_to_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\r\nworld\"");
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\nworld");
+    }
+
+    /// String literals preserve bare CR (not followed by LF) — matches legacy behavior.
+    #[test]
+    fn string_preserves_bare_cr() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"hello\rworld\"");
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "hello\rworld");
+    }
+
+    /// Quoted atoms preserve bare LF — matches legacy behavior.
+    #[test]
+    fn atom_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\nworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\nworld");
+    }
+
+    /// Quoted atoms normalize CRLF to LF — matches legacy behavior.
+    #[test]
+    fn atom_normalizes_crlf_to_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\r\nworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\nworld");
+    }
+
+    /// Quoted atoms preserve bare CR — matches legacy behavior.
+    #[test]
+    fn atom_preserves_bare_cr() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "'hello\rworld'");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_atom(&arena, &[]).unwrap(), "hello\rworld");
+    }
+
+    /// CR at the very start of a string (adjacent to opening quote) is preserved.
+    #[test]
+    fn string_preserves_cr_at_start() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"\rhello\"");
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\rhello");
+    }
+
+    /// CRLF at the very start of a string normalizes to LF.
+    #[test]
+    fn string_normalizes_crlf_at_start() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"\r\nhello\"");
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\nhello");
+    }
+
+    /// Script block `{...}` normalizes CRLF to LF — matches legacy.
+    #[test]
+    fn script_block_normalizes_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "{foo\r\nbar}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "foo\nbar");
+    }
+
+    /// Script block preserves bare LF.
+    #[test]
+    fn script_block_preserves_lf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "{foo\nbar}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "foo\nbar");
+    }
+
+    /// bin{N:...} preserves ALL raw bytes including CRLF sequences.
+    /// Legacy: `bin{2:\r\n}` → [13, 10] (2 bytes, `\r\n` preserved).
+    #[test]
+    fn bin_counted_preserves_leading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "bin{2:\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        match t.view(&arena).unwrap() {
+            View::Bin(bytes) => assert_eq!(bytes, &[0x0D, 0x0A]),
+            v => panic!("expected Bin, got {:?}", v),
+        }
+    }
+
+    /// bin{N:A\r\n} — CRLF after an ASCII byte preserved verbatim.
+    #[test]
+    fn bin_counted_preserves_nonleading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "bin{3:A\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        match t.view(&arena).unwrap() {
+            View::Bin(bytes) => assert_eq!(bytes, &[0x41, 0x0D, 0x0A]),
+            v => panic!("expected Bin, got {:?}", v),
+        }
+    }
+
+    /// text{N:...} normalizes CRLF to LF — matches legacy.
+    /// Legacy's `{NL}` rule always appends a single "\n".
+    /// `text{1:\r\n}` → "\n" (1 char).
+    #[test]
+    fn text_counted_normalizes_leading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "text{1:\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "\n");
+    }
+
+    /// text{N:A\r\n} — CRLF after an ASCII byte normalizes to LF.
+    /// Legacy `text{2:A\r\n}` → "A\n" (2 chars).
+    #[test]
+    fn text_counted_normalizes_nonleading_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "text{2:A\r\n}");
+        assert_eq!(ts.len(), 2);
+        let t: Term = ts[0].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "A\n");
+    }
+
+    /// Multiple CRLF sequences all normalize to LF.
+    #[test]
+    fn string_normalizes_multiple_crlf() {
+        let mut arena = Arena::new();
+        let ts = lex(&mut arena, "\"a\r\nb\r\nc\"");
+        assert_eq!(ts.len(), 4);
+        let t: Term = ts[1].value.clone().try_into().unwrap();
+        assert_eq!(t.unpack_str(&arena).unwrap(), "a\nb\nc");
     }
 }
