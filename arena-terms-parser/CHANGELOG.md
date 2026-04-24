@@ -1,10 +1,10 @@
 # Release Notes
 
-## [0.6.1] — 2026-04-23
+## [0.6.2] — 2026-04-23
 
 ### Dependencies
 
-* Requires `arena-terms` 0.6.1.
+* Requires `arena-terms` 0.6.2.
 
 ## [0.6.0] — 2026-04-22
 

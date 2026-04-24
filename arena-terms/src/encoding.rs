@@ -106,13 +106,50 @@ impl Encoding {
         }
     }
 
-    /// Returns the canonical WHATWG/IANA name for this encoding.
+    /// Returns the canonical name for this encoding (lowercase).
     pub fn name(&self) -> &'static str {
         match self {
             Self::Utf8 => "utf-8",
             Self::Ascii => "us-ascii",
             Self::Iso8859_1 => "iso-8859-1",
-            _ => self.to_encoding_rs().name(),
+            Self::Iso8859_2 => "iso-8859-2",
+            Self::Iso8859_3 => "iso-8859-3",
+            Self::Iso8859_4 => "iso-8859-4",
+            Self::Iso8859_5 => "iso-8859-5",
+            Self::Iso8859_6 => "iso-8859-6",
+            Self::Iso8859_7 => "iso-8859-7",
+            Self::Iso8859_8 => "iso-8859-8",
+            Self::Iso8859_8I => "iso-8859-8-i",
+            Self::Iso8859_9 => "iso-8859-9",
+            Self::Iso8859_10 => "iso-8859-10",
+            Self::Iso8859_13 => "iso-8859-13",
+            Self::Iso8859_14 => "iso-8859-14",
+            Self::Iso8859_15 => "iso-8859-15",
+            Self::Iso8859_16 => "iso-8859-16",
+            Self::Windows874 => "windows-874",
+            Self::Windows1250 => "windows-1250",
+            Self::Windows1251 => "windows-1251",
+            Self::Windows1252 => "windows-1252",
+            Self::Windows1253 => "windows-1253",
+            Self::Windows1254 => "windows-1254",
+            Self::Windows1255 => "windows-1255",
+            Self::Windows1256 => "windows-1256",
+            Self::Windows1257 => "windows-1257",
+            Self::Windows1258 => "windows-1258",
+            Self::Koi8R => "koi8-r",
+            Self::Koi8U => "koi8-u",
+            Self::Ibm866 => "ibm866",
+            Self::Macintosh => "macintosh",
+            Self::XMacCyrillic => "x-mac-cyrillic",
+            Self::ShiftJis => "shift_jis",
+            Self::EucJp => "euc-jp",
+            Self::Iso2022Jp => "iso-2022-jp",
+            Self::Gbk => "gbk",
+            Self::Gb18030 => "gb18030",
+            Self::Big5 => "big5",
+            Self::EucKr => "euc-kr",
+            Self::Utf16Be => "utf-16be",
+            Self::Utf16Le => "utf-16le",
         }
     }
 

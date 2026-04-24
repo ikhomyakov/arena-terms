@@ -1,5 +1,13 @@
 # Release Notes
 
+## [0.6.2] — 2026-04-23
+
+### Changed
+
+* **`Encoding::name()` returns lowercase canonical names** instead of delegating
+  to `encoding_rs` (which uses mixed-case WHATWG names like `Shift_JIS`).
+  Now consistently lowercase: `shift_jis`, `euc-jp`, `windows-1252`, etc.
+
 ## [0.6.1] — 2026-04-23
 
 ### Added
